@@ -42,6 +42,7 @@ let muscleDaysOn = state.days.map(d => d.id); // tutti i giorni attivi di defaul
 const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>';
 const ICON_INFO = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r=".6" fill="currentColor"/></svg>';
 const ICON_PLAY = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
+const ICON_EDIT = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M14 6l4 4"/></svg>';
 const ICON_MORE = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 
 // la barra in alto diventa visibile (sfocata, con bordo) solo quando la pagina scorre: come nelle app Apple
@@ -561,24 +562,29 @@ function renderWorkout() {
   let html = '';
 
   const nSets = day.exercises.reduce((n, ex) => n + ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0), 0);
+  // minuti stimati: per ogni serie ~45s di lavoro + il recupero della sua categoria
+  const estMin = Math.round(day.exercises.reduce((t, ex) => {
+    const rest = (state.settings.rest[ex.restCat] || state.settings.rest.normale).seconds;
+    const sets = ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0);
+    return t + sets * (45 + rest);
+  }, 0) / 60);
   if (!session) {
-    html += `<div class="day-select">` + state.days.map(d => {
-      const active = d.id === dayId;
-      return `<button class="day-pill ${active ? 'active' : ''}" data-day="${d.id}" style="--day:${d.color}">
+    html += `<div class="day-seg ${state.days.length > 4 ? 'scroll' : ''}">` + state.days.map(d => `
+      <button class="day-seg-item ${d.id === dayId ? 'on' : ''}" data-day="${d.id}" style="--day:${d.color}">
         <span class="day-letter">${dayLetter(d.id)}</span>
-        <span class="day-sub">${esc(dayMusclesShort(d))}</span>
-      </button>`;
-    }).join('') + `</div>`;
-    // intestazione del giorno con il pulsante per iniziare SUBITO in alto
-    html += `<div class="card day-head card-accent" style="--day:${day.color}">
-      <div class="row-between">
-        <div style="min-width:0">
-          <div class="card-title">${esc(day.name)}</div>
-          <div class="muted">${day.exercises.length} esercizi · ${nSets} serie</div>
-        </div>
-        <button class="btn-ghost" data-action="manage-days">Giorni</button>
+        <span class="day-seg-name">${esc(d.name)}</span>
+      </button>`).join('') + `</div>`;
+    const muscles = [...new Set(day.exercises.flatMap(e => e.muscles || []))];
+    html += `<div class="card day-hero" style="--day:${day.color}">
+      <div class="day-hero-name">${esc(day.name)}</div>
+      ${muscles.length ? `<div class="chip-wrap center">${muscles.slice(0, 6).map(m => `<span class="chip static">${esc((MUSCLES[m] || m).split(' ')[0])}</span>`).join('')}${muscles.length > 6 ? `<span class="chip static muted-chip">+${muscles.length - 6}</span>` : ''}</div>` : ''}
+      <div class="day-stats">
+        <div><span class="n">${day.exercises.length}</span><span class="l">esercizi</span></div>
+        <div><span class="n">${nSets}</span><span class="l">serie</span></div>
+        <div><span class="n">~${estMin}</span><span class="l">minuti</span></div>
       </div>
-      ${day.exercises.length ? `<button class="btn full" style="margin-top:12px;background:${day.color}" data-action="start-session" data-day="${day.id}">Inizia ${esc(day.name)}</button>` : `<p class="muted small" style="margin-top:10px">Tocca "Modifica" in alto per aggiungere esercizi.</p>`}
+      ${day.exercises.length ? `<button class="btn full" style="background:${day.color}" data-action="start-session" data-day="${day.id}">${ICON_PLAY}<span>Inizia ${esc(day.name)}</span></button>` : `<p class="muted small center-text">Tocca "Modifica" in alto per aggiungere esercizi.</p>`}
+      <button class="btn-ghost day-hero-manage" data-action="manage-days">Gestisci giorni</button>
     </div>`;
   } else {
     const all = Object.values(session.entries).flat();
@@ -649,6 +655,7 @@ function renderExercise(ex, index, day, session) {
   }
   const restShort = (rest.label.match(/\(([^)]+)\)/) || [])[1] || fmtTime(rest.seconds);
   let html = `<div class="ex-card ${exDone ? 'ex-done' : ''}" data-ex="${ex.id}">
+    <div class="ex-index">${index + 1} / ${day.exercises.length}</div>
     <div class="ex-head">
       <div class="ex-head-main">
         ${thumb}
@@ -658,13 +665,11 @@ function renderExercise(ex, index, day, session) {
         </div>
       </div>
       <div class="ex-tools">
-        <button class="icon-btn" data-action="ex-history" data-ex="${ex.id}" title="Storico" aria-label="Storico">${ICON_HISTORY}</button>
-        ${ex.dsId ? `<button class="icon-btn" data-action="show-how" data-ex="${ex.id}" title="Come si fa" aria-label="Come si fa">${ICON_INFO}</button>` : ''}
         ${editMode ? `
           <button class="icon-btn" data-action="move-ex" data-dir="-1" data-day="${day.id}" data-ex="${ex.id}" title="Su" aria-label="Sposta su">↑</button>
           <button class="icon-btn" data-action="move-ex" data-dir="1" data-day="${day.id}" data-ex="${ex.id}" title="Giù" aria-label="Sposta giù">↓</button>
         ` : ''}
-        <button class="icon-btn" data-action="edit-exercise" data-day="${day.id}" data-ex="${ex.id}" title="Modifica" aria-label="Modifica">${ICON_MORE}</button>
+        <button class="icon-btn" data-action="ex-menu" data-day="${day.id}" data-ex="${ex.id}" title="Opzioni" aria-label="Opzioni esercizio">${ICON_MORE}</button>
       </div>
     </div>
     <div class="ex-body">`;
@@ -721,13 +726,16 @@ function renderRow(ex, r, session) {
   } else {
     kgLabel = fmtWeight(r.weight);
   }
-  let html = `<div class="set-head"><span class="set-label">${esc(r.label)}</span> <span class="set-target">${target} · ${kgLabel}</span></div>`;
+  let html = `<div class="set-block"><div class="set-head"><span class="set-label">${esc(r.label)}</span><span class="set-target">${target} · ${kgLabel}</span></div>`;
 
   const lastNote = lastPerformance(r.id);
   if (lastNote) html += `<div class="suggestion-note">${lastNote}</div>`;
 
   if (session) {
     const entries = session.entries[r.id] || [];
+    html += r.type === 'tempo'
+      ? `<div class="set-cols tempo-row"><span>#</span><span>Cronometro</span><span>Secondi</span><span>✓</span></div>`
+      : `<div class="set-cols"><span>#</span><span>${unitLabel()}</span><span>Ripetizioni</span><span>✓</span></div>`;
     entries.forEach((e, i) => {
       if (r.type === 'tempo') {
         // plank & co.: cronometro conta-avanti che registra i secondi tenuti
@@ -753,12 +761,12 @@ function renderRow(ex, r, session) {
         <button class="set-done ${e.done ? 'done' : ''}" data-action="toggle-done" data-entry="${r.id}" data-i="${i}" data-cat="${ex.restCat}" aria-label="Serie completata">✓</button>
       </div>`;
     });
-    html += `<div class="row-gap" style="margin-bottom:10px">
-      <button class="btn-mini" data-action="add-set" data-entry="${r.id}">+ serie</button>
+    html += `<div class="set-more">
       ${entries.length > 1 ? `<button class="btn-mini" data-action="remove-set" data-entry="${r.id}">− serie</button>` : ''}
+      <button class="btn-mini" data-action="add-set" data-entry="${r.id}">+ serie</button>
     </div>`;
   }
-  return html;
+  return html + '</div>';
 }
 
 function lastPerformance(rowId) {
@@ -1392,6 +1400,29 @@ function editExerciseModal(dayId, exId) {
   });
 }
 
+/* Foglio di azioni dell'esercizio (come il menu "⋯" delle app Apple) */
+function exerciseMenu(dayId, exId) {
+  const day = getDay(dayId); if (!day) return;
+  const ex = day.exercises.find(e => e.id === exId); if (!ex) return;
+  const modal = openModal(`
+    <div class="sheet-title">${esc(ex.name)}</div>
+    <div class="sheet-list">
+      ${ex.dsId ? `<button data-go="how">${ICON_INFO}<span>Come si fa</span></button>` : ''}
+      <button data-go="history">${ICON_HISTORY}<span>Storico</span></button>
+      <button data-go="edit">${ICON_EDIT}<span>Modifica esercizio</span></button>
+    </div>
+    <button class="btn secondary full" data-close>Annulla</button>
+  `);
+  modal.classList.add('sheet');
+  modal.querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => {
+    closeModal();
+    const go = b.dataset.go;
+    if (go === 'how') showHowToModal(exId);
+    else if (go === 'history') exerciseHistoryModal(exId);
+    else editExerciseModal(dayId, exId);
+  }));
+}
+
 /* =================== CRONOMETRO PLANK (tipo 'tempo') =================== */
 /* Conta-avanti a schermo: allo STOP registra i secondi tenuti nella serie. */
 function tempoTimer(entryId, idx, cat) {
@@ -1676,6 +1707,7 @@ function handleAction(a, btn) {
     else if (a === 'add-cardio') editCardioModal(null);
     else if (a === 'show-how') showHowToModal(btn.dataset.ex);
     else if (a === 'ex-history') exerciseHistoryModal(btn.dataset.ex);
+    else if (a === 'ex-menu') exerciseMenu(btn.dataset.day, btn.dataset.ex);
     else if (a === 'finish-session') finishSession();
     else if (a === 'cancel-session') cancelSession();
     else if (a === 'cardio-timer') startTimer(state.settings.warmupName || 'Riscaldamento', state.settings.cardioSeconds);
