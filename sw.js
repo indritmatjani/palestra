@@ -1,8 +1,7 @@
 /* ============ Service worker: offline + aggiornamento automatico ============
    Cambia VERSION a ogni rilascio: il telefono scarica i file nuovi e si ricarica da solo. */
-const VERSION = 'palestra-v2.1.0';
+const VERSION = 'palestra-v23';
 const APP_CACHE = VERSION + '-app';
-const MEDIA_CACHE = 'palestra-media-v1'; // immagini esercizi: restano tra una versione e l'altra
 
 const APP_SHELL = [
   './',
@@ -32,7 +31,7 @@ self.addEventListener('install', event => {
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys()
-      .then(keys => Promise.all(keys.filter(k => k !== APP_CACHE && k !== MEDIA_CACHE).map(k => caches.delete(k))))
+      .then(keys => Promise.all(keys.filter(k => k !== APP_CACHE).map(k => caches.delete(k))))
       .then(() => self.clients.claim())
   );
 });
@@ -42,32 +41,23 @@ self.addEventListener('fetch', event => {
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
 
-  // immagini/GIF del dataset: cache-first (non cambiano mai)
-  if (url.hostname === 'raw.githubusercontent.com' && url.pathname.includes('/exercises-dataset/')) {
-    event.respondWith(
-      caches.open(MEDIA_CACHE).then(cache =>
-        cache.match(req).then(hit => hit || fetch(req).then(res => {
-          if (res.ok || res.type === 'opaque') cache.put(req, res.clone());
-          return res;
-        }))
-      )
-    );
-    return;
-  }
+  // le immagini degli esercizi (GitHub) non passano dal service worker:
+  // le gestisce la cache normale del browser (evita di riempire la memoria del telefono)
 
-  // file dell'app: dalla cache (veloce e offline), aggiornati in background
+  // file dell'app: prima la rete (versione sempre aggiornata), la cache solo se sei offline
   if (url.origin === self.location.origin) {
     event.respondWith(
-      caches.open(APP_CACHE).then(cache =>
-        cache.match(req, { ignoreSearch: true }).then(hit => {
-          const net = fetch(req).then(res => {
-            if (res.ok) cache.put(req, res.clone());
-            return res;
-          }).catch(() => hit || (req.mode === 'navigate' ? cache.match('index.html') : Response.error()));
-          return hit || net;
-        })
-      )
+      fetch(req).then(res => {
+        if (res.ok) { const copy = res.clone(); caches.open(APP_CACHE).then(c => c.put(req, copy)); }
+        return res;
+      }).catch(() => caches.match(req, { ignoreSearch: true }).then(hit => {
+        if (hit) return hit;
+        // pagina di riserva solo per le navigazioni, mai per js/css/immagini
+        if (req.mode === 'navigate') return caches.match('index.html');
+        return Response.error();
+      }))
     );
+    return;
   }
   // tutto il resto (es. Supabase sync) va direttamente in rete
 });
