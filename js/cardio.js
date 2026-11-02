@@ -76,22 +76,57 @@ function renderCardio() {
     return `<div class="card"><p class="muted">Nessuna attività cardio.</p></div>
       <button class="btn full" data-action="add-cardio">Aggiungi attività</button>`;
   }
+  const wk = cardioWeekStats();
+  const goal = state.settings.weeklyCardioGoal || 2;
+  const summary = `<div class="card cardio-week">
+    ${progressRing(wk.count, goal, 'var(--red)')}
+    <div>
+      <div class="tile-kick">Questa settimana</div>
+      <div class="cardio-week-num">${wk.minutes}<span> min</span></div>
+      <div class="muted">${wk.count} ${wk.count === 1 ? 'sessione' : 'sessioni'} · obiettivo ${goal}</div>
+    </div>
+  </div>`;
   const cards = state.cardio.map(c => {
     const last = cardioLastText(c);
     const g = cardioGoalText(c);
+    const rec = cardioRecords(c);
+    let recText = '';
+    if (rec && c.type === 'interval') recText = rec.longestCont ? 'Record continuo ' + fmtClock(rec.longestCont) : (rec.bestWork ? 'Miglior lavoro completato ' + rec.bestWork + 's' : '');
+    else if (rec) recText = 'Record ' + fmtClock(rec.longest) + (rec.bestSpeed ? ' · ' + fmtSpeed(rec.bestSpeed) : '');
     return `<div class="card cardio-card" style="--day:${c.color}">
       <div class="row-between">
         <div class="cardio-name"><span class="dot"></span>${esc(c.name)}</div>
-        <button class="icon-btn" data-action="edit-cardio" data-cid="${c.id}" aria-label="Modifica">⋯</button>
+        <div class="row-gap" style="gap:0">
+          <button class="icon-btn" data-action="cardio-history" data-cid="${c.id}" aria-label="Storico">${ICON_HISTORY}</button>
+          <button class="icon-btn" data-action="edit-cardio" data-cid="${c.id}" aria-label="Modifica">${ICON_MORE}</button>
+        </div>
       </div>
       <div class="cardio-goal"><span class="big">${esc(g.big)}</span><span class="unit">${esc(g.unit)}</span></div>
       <div class="muted">${esc(g.sub)}</div>
-      ${last ? `<div class="cardio-last">Ultima volta · ${esc(last)}</div>` : ''}
+      ${last ? `<div class="cardio-last">Ultima volta · ${esc(last)}${recText ? `<br><span class="muted">${esc(recText)} · ${rec.sessions} sessioni</span>` : ''}</div>` : ''}
       <div id="cardio-chart-${c.id}" class="cardio-chart"></div>
       <button class="btn full" style="background:${c.color}" data-action="start-cardio" data-cid="${c.id}">Avvia</button>
     </div>`;
   }).join('');
-  return cards + `<button class="btn secondary full" data-action="add-cardio">Aggiungi attività</button>`;
+  return summary + cards + `<button class="btn secondary full" data-action="add-cardio">Aggiungi attività</button>`;
+}
+
+function cardioHistoryModal(cid) {
+  const c = getCardio(cid);
+  if (!c) return;
+  const log = (c.log || []).filter(Boolean).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+  const row = l => {
+    let right;
+    if (c.type === 'interval') right = (l.restSec === 0 ? 'Continuo ' : l.workSec + 's/' + l.restSec + 's · ') + l.roundsDone + '/' + (l.rounds || '?') + ' · ' + fmtClock(l.totalSec || 0);
+    else right = fmtClock(l.durationSec || 0) + (l.distanceKm ? ' · ' + fmtKg(l.distanceKm) + ' km · ' + fmtSpeed(cardioSpeed(l)) : '');
+    return `<div class="hist-item"><span class="muted">${fmtDate(l.date)}</span><span style="text-align:right">${esc(right)}</span></div>`;
+  };
+  openModal(`
+    <h2>${esc(c.name)} — storico</h2>
+    <p class="muted small" style="margin-bottom:10px">${log.length} sessioni, più recenti in alto.</p>
+    ${log.length ? log.map(row).join('') : '<p class="muted">Ancora nessuna sessione.</p>'}
+    <div class="modal-actions"><button class="btn" data-close>Chiudi</button></div>
+  `);
 }
 
 function cardioSeries(c) {
@@ -240,7 +275,8 @@ function runStopwatch(c) {
     <div class="ci-top">
       <div class="ci-phase">${c.type === 'steady' ? 'CARDIO' : 'CRONOMETRO'}</div>
       <div class="ci-time" id="cs-time">0:00</div>
-      ${target ? `<div class="ci-next" id="cs-target">Obiettivo ${fmtClock(target)}</div>` : ''}
+      ${target ? `<div class="ci-next" id="cs-target">Obiettivo ${fmtClock(target)}</div>
+      <div class="ci-bar"><div id="cs-bar"></div></div>` : ''}
     </div>
     <div class="ci-actions">
       <button class="btn" id="cs-pause" style="background:rgba(255,255,255,0.22)">Pausa</button>
@@ -252,10 +288,18 @@ function runStopwatch(c) {
   let startedAt = Date.now(), paused = false, pausedAcc = 0, pauseStart = 0, reached = false;
   if (typeof acquireWakeLock === 'function') acquireWakeLock();
   const elapsed = () => Math.round((Date.now() - startedAt - pausedAcc) / 1000);
+  let halfSaid = false;
   const tick = () => {
     const s = elapsed();
     timeEl.textContent = fmtClock(s);
-    if (target && !reached && s >= target) { reached = true; beepEnd(); const t = fs.querySelector('#cs-target'); if (t) { t.textContent = '✓ Obiettivo raggiunto!'; t.style.color = '#fff'; t.style.fontWeight = '700'; } }
+    if (target) {
+      const bar = fs.querySelector('#cs-bar');
+      if (bar) bar.style.width = Math.min(100, s / target * 100) + '%';
+      const t = fs.querySelector('#cs-target');
+      if (!reached && t) t.textContent = 'Obiettivo ' + fmtClock(target) + ' · mancano ' + fmtClock(Math.max(0, target - s));
+      if (!halfSaid && s >= target / 2) { halfSaid = true; say('Metà fatta'); }
+    }
+    if (target && !reached && s >= target) { reached = true; beepEnd(); say('Obiettivo raggiunto'); const t = fs.querySelector('#cs-target'); if (t) { t.textContent = '✓ Obiettivo raggiunto! Continua se vuoi'; t.style.color = '#fff'; t.style.fontWeight = '700'; } }
   };
   cardioTimer.interval = setInterval(tick, 250);
 

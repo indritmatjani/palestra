@@ -79,11 +79,13 @@ function bestRepsFor(rowId, beforeDate) {
 }
 
 function exercise(name, opts) {
-  return Object.assign({
+  const ex = Object.assign({
     id: uid(), name, note: '',
     restCat: 'normale', warmup: 'none',
     muscles: [], rows: [],
   }, opts);
+  if (!(Number(ex.incKg) > 0)) ex.incKg = defaultIncFor(ex, 2.5);
+  return ex;
 }
 
 function defaultState() {
@@ -97,6 +99,7 @@ function defaultState() {
       warmupRest: 60,
       autoProgress: true,
       weeklyGoal: 3,     // obiettivo sedute/settimana (anello di progresso nella Home)
+      weeklyCardioGoal: 2, // obiettivo sessioni cardio/settimana (secondo anello nella Home)
       unit: 'kg',        // 'kg' | 'lb' (i pesi sono sempre salvati in kg)
       theme: 'auto',     // 'auto' (segue iPhone) | 'dark' | 'light'
       cardioVoice: true, // conteggio vocale nel cardio
@@ -374,12 +377,47 @@ function cardioLast(c) {
   return log[0] || null;
 }
 
+/* Velocità media (km/h) di una sessione con distanza, o 0. */
+function cardioSpeed(l) {
+  return l && l.distanceKm && l.durationSec ? l.distanceKm / (l.durationSec / 3600) : 0;
+}
+function fmtSpeed(v) { return fmtKg(Math.round(v * 10) / 10) + ' km/h'; }
+
+/* Sessioni e minuti di cardio della settimana corrente (tutte le attività). */
+function cardioWeekStats(dateISO) {
+  const wk = isoWeekKey(dateISO || todayISO());
+  let count = 0, sec = 0;
+  for (const c of (state.cardio || [])) for (const l of (c.log || [])) {
+    if (!l || isoWeekKey(l.date) !== wk) continue;
+    count++;
+    sec += l.durationSec || l.totalSec || 0;
+  }
+  return { count, minutes: Math.round(sec / 60) };
+}
+
+/* Record di un'attività: durata più lunga, velocità migliore, round migliori. */
+function cardioRecords(c) {
+  const log = (c.log || []).filter(Boolean);
+  if (!log.length) return null;
+  if (c.type === 'interval') {
+    const cont = log.filter(l => l.restSec === 0 && l.roundsDone >= (l.rounds || 0));
+    const longestCont = cont.length ? Math.max(...cont.map(l => l.totalSec || 0)) : 0;
+    return { sessions: log.length, longestCont, bestWork: Math.max(...log.filter(l => l.roundsDone >= (l.rounds || 0)).map(l => l.workSec || 0), 0) };
+  }
+  return {
+    sessions: log.length,
+    longest: Math.max(...log.map(l => l.durationSec || 0)),
+    bestSpeed: Math.max(...log.map(cardioSpeed), 0),
+    bestKm: Math.max(...log.map(l => l.distanceKm || 0), 0),
+  };
+}
+
 /* Testo "ultima volta" da mostrare in evidenza */
 function cardioLastText(c) {
   const l = cardioLast(c);
   if (!l) return null;
   if (c.type === 'interval') return fmtDate(l.date) + ': ' + l.roundsDone + '/' + (l.rounds || c.rounds) + ' round · ' + fmtClock(l.totalSec || 0);
-  if (c.type === 'steady') return fmtDate(l.date) + ': ' + fmtClock(l.durationSec) + (l.distanceKm ? ' · ' + fmtKg(l.distanceKm) + ' km' : '');
+  if (c.type === 'steady') return fmtDate(l.date) + ': ' + fmtClock(l.durationSec) + (l.distanceKm ? ' · ' + fmtKg(l.distanceKm) + ' km · ' + fmtSpeed(cardioSpeed(l)) : '');
   return fmtDate(l.date) + ': ' + fmtClock(l.durationSec);
 }
 
@@ -450,6 +488,10 @@ function migrateState(s) {
   s.days.forEach((d, i) => {
     if (!d.color) d.color = palette[i % palette.length];
     if (!Array.isArray(d.exercises)) d.exercises = [];
+    d.exercises.forEach(ex => {
+      if (!(Number(ex.incKg) > 0)) ex.incKg = defaultIncFor(ex, s.settings && s.settings.smallIncrement);
+      (ex.rows || []).forEach(r => { if (r.failCount == null) r.failCount = 0; });
+    });
   });
   if (!Array.isArray(s.cardio)) s.cardio = def.cardio;
   // aggiunge una sola volta tapis roulant e cyclette (se non esistono già attività simili)
@@ -555,6 +597,19 @@ function findRow(rowId) {
   return null;
 }
 
+/* Incremento di peso di un esercizio (kg). Ogni esercizio ha il suo:
+   sugli esercizi leggeri +2,5 kg può essere un salto del 20–25%. */
+function exIncrement(ex) {
+  const v = ex && Number(ex.incKg);
+  return v > 0 ? v : (state.settings.smallIncrement || 2.5);
+}
+/* Incremento predefinito in base al peso: leggero (<25 kg) → 1 kg, altrimenti quello generale. */
+function defaultIncFor(ex, fallback) {
+  const w = Math.max(0, ...(ex.rows || []).filter(r => r.type === 'range').map(r => r.weight || 0));
+  return w > 0 && w < 25 ? 1 : (fallback || 2.5);
+}
+function roundHalf(kg) { return Math.round(kg * 2) / 2; }
+
 function roundToPlate(kg) {
   return Math.round(kg / 2.5) * 2.5;
 }
@@ -618,9 +673,12 @@ function effectiveWeight(weight) {
 }
 
 /* ---------- record personali (PR) e 1RM stimato ---------- */
-/* 1RM stimato con formula di Epley: 1RM = peso * (1 + rep/30). */
+/* 1RM stimato con formula di Epley: 1RM = peso * (1 + rep/30).
+   Le formule di stima sono attendibili solo con poche ripetizioni: oltre le 12
+   sovrastimano molto (es. 93 kg × 13 → 133 kg), quindi quelle serie non contano. */
+const E1RM_MAX_REPS = 12;
 function e1RM(kg, reps) {
-  if (!kg || !reps) return 0;
+  if (!kg || !reps || reps > E1RM_MAX_REPS) return 0;
   if (reps <= 1) return kg;
   return kg * (1 + reps / 30);
 }
@@ -750,7 +808,7 @@ function sessionDays() {
 }
 
 /* ---------- progressione ----------
- range:  reps > repMax → peso + incremento ; nel range → uguale ; < repMin → peso − incremento
+ range:  reps ≥ repMax → peso + incremento dell'esercizio ; nel range → uguale ; < repMin → peso − incremento
  russo:  tutte le serie completate a target → passo successivo dello schema;
          dopo 5x5 → peso + russoIncrement e si riparte da 3x3.
  Applica la progressione al programma dopo il completamento di una seduta.
@@ -778,9 +836,18 @@ function applyProgression(session) {
         const [nSets, nReps] = RUSSO_SCHEME[Math.min(idx, RUSSO_SCHEME.length - 1)];
         const ok = entries.length >= nSets && entries.every(e => (e.reps || 0) >= nReps);
         if (!ok) {
-          changes.push({ ex: ex.name, row: r.label, kind: 'same', text: 'Ripeti ' + russoLabel(idx) });
+          const fails = (r.failCount || 0) + 1;
+          if (fails >= 2 && idx > 0) {
+            // 2 volte di fila non completato: un passo indietro per consolidare
+            changes.push({ ex: ex.name, row: r.label, kind: 'down', text: '2° tentativo non riuscito: ' + russoLabel(idx) + ' → ' + russoLabel(idx - 1) });
+            if (state.settings.autoProgress) { r.schemeIndex = idx - 1; r.failCount = 0; }
+          } else {
+            changes.push({ ex: ex.name, row: r.label, kind: 'same', text: 'Ripeti ' + russoLabel(idx) + (fails >= 2 ? '' : ' (se non riesce di nuovo, si torna indietro di un passo)') });
+            if (state.settings.autoProgress) r.failCount = fails;
+          }
           continue;
         }
+        if (state.settings.autoProgress) r.failCount = 0;
         if (idx >= RUSSO_SCHEME.length - 1) {
           const newW = roundToPlate((r.weight || 0) + (r.russoIncrement || 5));
           changes.push({ ex: ex.name, row: r.label, kind: 'up', text: fmtKg(r.weight) + ' → ' + fmtKg(newW) + ' kg, da 3x3' });
@@ -812,7 +879,7 @@ function applyProgression(session) {
       const lastKg = kgs.length ? Math.max(...kgs) : r.weight;
       const atTop = kgs.length ? entries.filter(e => e.kg === lastKg) : entries;
       const bestReps = Math.max(...atTop.map(e => e.reps || 0));
-      const inc = state.settings.smallIncrement || 2.5;
+      const inc = exIncrement(ex);
       // tetto di carico raggiunto (es. macchina a 93 kg): si cresce a ripetizioni
       if (r.maxWeight && lastKg >= r.maxWeight && bestReps >= r.repMax) {
         const prevBest = bestRepsFor(r.id, session.date);
@@ -823,13 +890,14 @@ function applyProgression(session) {
         });
         continue;
       }
-      if (bestReps > r.repMax) {
-        let newW = roundToPlate(lastKg + inc);
+      if (bestReps >= r.repMax) {
+        // doppia progressione: raggiunto il massimo del range (es. 8 su 4–8) → più peso
+        let newW = roundHalf(lastKg + inc);
         if (r.maxWeight && newW > r.maxWeight) newW = r.maxWeight; // non superare il tetto
         changes.push({ ex: ex.name, row: r.label, kind: 'up', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
         if (state.settings.autoProgress) r.weight = newW;
       } else if (bestReps < r.repMin) {
-        const newW = Math.max(0, roundToPlate(lastKg - inc));
+        const newW = Math.max(0, roundHalf(lastKg - inc));
         changes.push({ ex: ex.name, row: r.label, kind: 'down', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
         if (state.settings.autoProgress) r.weight = newW;
       } else {

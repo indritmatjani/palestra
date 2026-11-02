@@ -43,7 +43,7 @@ async function syncRpc(name, args) {
 
 /* Fonde due stati SENZA perdere dati registrati:
    - sessions: unione per id (tutte le sedute di entrambi i dispositivi)
-   - cardio log: unione per (attività + data)
+   - cardio log: unione per sessione (attività + data + durata)
    - programma (giorni/esercizi), profilo e impostazioni: vince lo stato più recente
    Ritorna lo stato fuso. */
 function syncMerge(local, remote) {
@@ -65,8 +65,10 @@ function syncMerge(local, remote) {
     const oc = otherCardio[c.id];
     if (!oc || !Array.isArray(oc.log)) continue;
     if (!Array.isArray(c.log)) c.log = [];
-    const seen = new Set(c.log.map(l => l && l.date));
-    for (const l of oc.log) if (l && !seen.has(l.date)) { c.log.push(l); seen.add(l.date); }
+    // chiave di una sessione: data + durata/round (due sessioni nello stesso giorno restano distinte)
+    const key = l => l && [l.date, l.durationSec || 0, l.totalSec || 0, l.roundsDone || 0, l.distanceKm || 0].join('|');
+    const seen = new Set(c.log.map(key));
+    for (const l of oc.log) if (l && !seen.has(key(l))) { c.log.push(l); seen.add(key(l)); }
     c.log.sort((a, b) => (a.date < b.date ? -1 : 1));
   }
   merged.updatedAt = Math.max(localAt, remoteAt);

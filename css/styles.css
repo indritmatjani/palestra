@@ -632,3 +632,29 @@ p.suggestion-note { color: var(--good); font-weight: 500; font-size: .88rem; }
 /* Titoli dentro le card più sobri */
 .card h3 { font-size: .95rem; font-weight: 650; }
 .home-kick, .tile-kick { letter-spacing: .03em; }
+
+/* ---------- Novità: riscaldamento a scomparsa, anelli, riepilogo cardio ---------- */
+details.warmup-box summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 8px; cursor: pointer; min-height: 28px; margin: 0; }
+details.warmup-box summary::-webkit-details-marker { display: none; }
+details.warmup-box summary::after { content: '›'; font-size: 1.2rem; color: var(--ink-muted); transition: transform .2s; margin-left: 4px; }
+details.warmup-box[open] summary::after { transform: rotate(90deg); }
+details.warmup-box summary .muted { margin-left: auto; font-size: .78rem; }
+details.warmup-box[open] summary { margin-bottom: 4px; }
+details.warmup-box { padding: 8px 12px; }
+
+.tile[data-action] { cursor: pointer; }
+.tile[data-action]:active { transform: scale(.98); }
+.ring-split.row { flex-direction: row; justify-content: space-around; gap: 8px; }
+.ring-split.row .ring-mini { flex-direction: column; align-items: center; text-align: center; gap: 2px; }
+.ring-split.row .ring-mini .n { min-width: 0; }
+
+.cardio-week { display: flex; align-items: center; gap: 18px; }
+.cardio-week .ring-wrap { margin: 0; flex: 0 0 auto; }
+.cardio-week-num { font-family: var(--font-num); font-size: 2rem; font-weight: 750; letter-spacing: -.02em; line-height: 1.1; }
+.cardio-week-num span { font-size: 1rem; color: var(--ink-muted); font-weight: 600; }
+
+.ci-bar { width: min(320px, 80vw); height: 8px; border-radius: 4px; background: rgba(255,255,255,.25); margin: 14px auto 0; overflow: hidden; }
+.ci-bar > div { height: 100%; width: 0; background: #fff; border-radius: 4px; transition: width .25s linear; }
+
+.seg.seg-sm { margin: -2px 0 12px; }
+.seg.seg-sm button { min-height: 30px; font-size: .8rem; }

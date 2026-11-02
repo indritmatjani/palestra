@@ -61,8 +61,13 @@ function lineChart(container, series, opts) {
   }
   // etichette X (max ~5)
   const xEvery = Math.max(1, Math.ceil(dates.length / 4));
+  // date da mostrare: una ogni xEvery, più l'ultima; se l'ultima è troppo vicina alla precedente, la sostituisce
+  const shown = new Set();
+  dates.forEach((d, i) => { if (i % xEvery === 0) shown.add(i); });
+  const lastI = dates.length - 1, prevShown = Math.max(...shown);
+  if (prevShown !== lastI) { if (lastI - prevShown < Math.max(2, xEvery * 0.75)) shown.delete(prevShown); shown.add(lastI); }
   dates.forEach((d, i) => {
-    if (i % xEvery === 0 || i === dates.length - 1) {
+    if (shown.has(i)) {
       const anchor = dates.length > 1 && i === 0 ? 'start' : (dates.length > 1 && i === dates.length - 1 ? 'end' : 'middle');
       g += `<text x="${xPos(d)}" y="${H - 10}" text-anchor="${anchor}" style="fill:var(--ink-muted)" font-size="15">${fmtDate(d)}</text>`;
     }
@@ -139,6 +144,17 @@ function rowWeightHistory(rowId) {
     const bestKg = Math.max(...entries.map(e => e.kg));
     const best = entries.find(e => e.kg === bestKg);
     pts.push({ x: s.date, y: bestKg, label: (best.reps || 0) + ' rep', deload: deloadWeekActive(s.date) });
+  }
+  return pts.sort((a, b) => (a.x < b.x ? -1 : 1));
+}
+
+/* Miglior risultato in ripetizioni (o secondi) per seduta: per esercizi senza peso. */
+function rowRepsHistory(rowId) {
+  const pts = [];
+  for (const s of state.sessions) {
+    if (!s.completed) continue;
+    const reps = (s.entries[rowId] || []).filter(e => e.done && e.reps).map(e => e.reps);
+    if (reps.length) pts.push({ x: s.date, y: Math.max(...reps), deload: deloadWeekActive(s.date) });
   }
   return pts.sort((a, b) => (a.x < b.x ? -1 : 1));
 }

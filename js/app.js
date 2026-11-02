@@ -30,6 +30,7 @@ let currentView = 'home';
 let selectedDayId = state.uiSelectedDay || 'A';
 let editMode = false;
 let profileTab = 'profilo'; // sotto-sezione del Profilo: 'profilo' | 'allenamento' | 'backup'
+let chartRange = '6'; // periodo grafici: '6' (ultimi 6 allenamenti) | '90' (3 mesi) | 'all'
 let progressTab = 'grafici'; // sotto-sezione di Progressi: 'grafici' | 'muscoli'
 let chartExRowId = null;
 let chartVolumeDay = state.days[0] ? state.days[0].id : 'A';
@@ -390,13 +391,13 @@ function lastCardioAny() {
 
 /* Anello di progresso SVG (obiettivo settimanale). Parte "vuoto" e si riempie:
    l'offset finale è in data-off, applicato da animateRings() al frame dopo il render. */
-function progressRing(done, goal) {
+function progressRing(done, goal, color) {
   const g = Math.max(1, goal || 1);
   const pct = Math.max(0, Math.min(1, done / g));
   const r = 41, c = 2 * Math.PI * r;
   const off = c * (1 - pct);
   const reached = done >= g;
-  const col = reached ? 'var(--good)' : 'var(--accent)';
+  const col = reached ? 'var(--good)' : (color || 'var(--accent)');
   return `<div class="ring-wrap">
     <svg class="ring animate" viewBox="0 0 104 104" aria-hidden="true">
       <circle class="ring-track" cx="52" cy="52" r="${r}"></circle>
@@ -405,7 +406,7 @@ function progressRing(done, goal) {
     </svg>
     <div class="ring-center ${reached ? 'ring-done' : ''}">
       <div class="rc-n">${done}<span class="rc-of">/${g}</span></div>
-      <div class="rc-l">${reached ? '✓ fatto' : 'sedute'}</div>
+      <div class="rc-l">${reached ? '✓ fatto' : (color ? 'sessioni' : 'sedute')}</div>
     </div>
   </div>`;
 }
@@ -484,13 +485,18 @@ function renderHome() {
 
   html += `<div class="bento">
     ${primaryTile}
-    <div class="tile tile-ring">
-      <div class="tile-kick">Obiettivo settimana</div>
+    <div class="tile tile-ring" data-action="go-workout">
+      <div class="tile-kick">Pesi · settimana</div>
       ${progressRing(settimana, goal)}
     </div>
-    <div class="tile ring-split">
+    <div class="tile tile-ring" data-action="go-cardio">
+      <div class="tile-kick">Cardio · settimana</div>
+      ${progressRing(cardioWeekStats().count, state.settings.weeklyCardioGoal || 2, 'var(--red)')}
+    </div>
+    <div class="tile span2 ring-split row">
       <div class="ring-mini"><span class="n">${streak}</span><span class="l">settimane<br>di fila</span></div>
       <div class="ring-mini"><span class="n">${totale}</span><span class="l">sedute<br>totali</span></div>
+      <div class="ring-mini"><span class="n">${cardioWeekStats().minutes}</span><span class="l">min cardio<br>settimana</span></div>
     </div>
   </div>`;
 
@@ -631,13 +637,13 @@ function renderExercise(ex, index, day, session) {
     const s1 = ex.rows[0] ? effectiveWeight(ex.rows[0].weight) : 0; // in settimana di scarico: sul peso ridotto
     const steps = warmupSteps(ex.warmup, s1);
     if (steps.length && s1 > 0) {
-      html += `<div class="warmup-box">
-        <div class="warmup-title"><span>Riscaldamento ${ex.warmup === 'full' ? 'completo' : 'ridotto'}</span></div>
+      html += `<details class="warmup-box">
+        <summary class="warmup-title"><span>Riscaldamento ${ex.warmup === 'full' ? 'completo' : 'ridotto'}</span><span class="muted">${steps.map(st => fmtKg(toDisplayWeight(st.kg))).join(' · ')} ${unitLabel()}</span></summary>
         ${steps.map(st => `<div class="wu-row">
           <span>${st.pct}% → <strong>${fmtWeight(st.kg)}</strong> × ${st.reps}</span>
           <button class="btn-mini" data-action="warmup-timer">Rest ${fmtTime(state.settings.warmupRest)}</button>
         </div>`).join('')}
-      </div>`;
+      </details>`;
     }
   }
 
@@ -743,20 +749,21 @@ function renderCharts() {
   return `
     <div class="chart-box">
       <h3>Forza per esercizio</h3>
-      <div class="sub">Peso massimo per seduta · ultimi 6 allenamenti · 🪶 = settimana di scarico</div>
+      <div class="sub" id="chart-ex-sub">Peso massimo per seduta · 🪶 = settimana di scarico</div>
       <div class="form-row"><select id="chart-ex-select">
         ${opts.map(o => `<option value="${o.id}" ${o.id === chartExRowId ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select></div>
+      <div class="seg seg-sm">${[['6', 'Ultimi 6'], ['90', '3 mesi'], ['all', 'Tutto']].map(([k, l]) => `<button data-action="chart-range" data-range="${k}" class="${chartRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="chart-exercise"></div>
     </div>
     <div class="chart-box">
       <h3>Trend 1RM stimato</h3>
-      <div class="sub">Massimale stimato (Epley) · ultimi 6 allenamenti · 🪶 = scarico</div>
+      <div class="sub">Massimale stimato (Epley) da serie fino a 12 rep · 🪶 = scarico</div>
       <div id="chart-e1rm"></div>
     </div>
     <div class="chart-box">
       <h3>Volume per seduta</h3>
-      <div class="sub">Somma kg × rep · ultimi 6 allenamenti · 🪶 = scarico</div>
+      <div class="sub">Somma kg × rep · 🪶 = scarico</div>
       <div class="day-select compact" style="margin-bottom:10px">
         ${state.days.map(d => `<button class="day-pill ${d.id === chartVolumeDay ? 'active' : ''}" data-volday="${d.id}" style="--day:${d.color}"><span class="day-letter">${dayLetter(d.id)}</span></button>`).join('')}
       </div>
@@ -804,17 +811,36 @@ function calendarHeatmap(weeks) {
 }
 
 function mountCharts() {
-  const LAST_N = 6; // mostra solo gli ultimi 6 allenamenti per leggere l'andamento
+  // periodo scelto: ultimi 6 allenamenti, ultimi 3 mesi o tutto
+  const since = new Date(); since.setDate(since.getDate() - 90);
+  const sinceISO = since.toISOString().slice(0, 10);
+  const pick = pts => chartRange === '6' ? pts.slice(-6) : chartRange === '90' ? pts.filter(p => p.x >= sinceISO) : pts;
   if (chartExRowId) {
-    lineChart($('#chart-exercise'), [{ name: 'kg', color: '#0a84ff', points: rowWeightHistory(chartExRowId).slice(-LAST_N) }], { unit: 'kg' });
+    const found = findRow(chartExRowId);
+    const r = found && found.row;
+    const wPts = rowWeightHistory(chartExRowId);
+    // corpo libero / a cedimento: il peso è sempre 0 → mostro ripetizioni (o secondi)
+    const byReps = r && (r.type === 'reps' || r.type === 'tempo' || !wPts.some(p => p.y > 0));
+    const sub = $('#chart-ex-sub');
+    if (byReps) {
+      const unit = r.type === 'tempo' ? 'sec' : 'rep';
+      if (sub) sub.textContent = (unit === 'sec' ? 'Secondi migliori' : 'Ripetizioni migliori') + ' per seduta (esercizio senza peso o a cedimento)';
+      lineChart($('#chart-exercise'), [{ name: unit, color: '#0a84ff', points: pick(rowRepsHistory(chartExRowId)) }], { unit });
+    } else {
+      if (sub) sub.textContent = 'Peso massimo per seduta · 🪶 = settimana di scarico';
+      lineChart($('#chart-exercise'), [{ name: 'kg', color: '#0a84ff', points: pick(wPts) }], { unit: 'kg' });
+    }
     const e1 = $('#chart-e1rm');
-    if (e1) lineChart(e1, [{ name: '1RM', color: '#30d158', points: e1RMHistory(chartExRowId).slice(-LAST_N) }], { unit: 'kg' });
+    if (e1) {
+      if (byReps) e1.innerHTML = '<div class="chart-empty">Il massimale stimato serve per gli esercizi con peso.</div>';
+      else lineChart(e1, [{ name: '1RM', color: '#30d158', points: pick(e1RMHistory(chartExRowId)) }], { unit: 'kg' });
+    }
   } else {
     $('#chart-exercise').innerHTML = '<div class="chart-empty">Nessun esercizio.</div>';
   }
   if (!getDay(chartVolumeDay) && state.days[0]) chartVolumeDay = state.days[0].id;
   const volColor = (getDay(chartVolumeDay) || {}).color || '#0a84ff';
-  lineChart($('#chart-volume'), [{ name: 'volume', color: volColor, points: dayVolumeHistory(chartVolumeDay).slice(-LAST_N) }], { unit: 'kg tot' });
+  lineChart($('#chart-volume'), [{ name: 'volume', color: volColor, points: pick(dayVolumeHistory(chartVolumeDay)) }], { unit: 'kg tot' });
   const bwPts = (state.profile.bodyWeightLog || []).map(e => ({ x: e.date, y: e.kg }));
   lineChart($('#chart-bodyweight'), [{ name: 'peso', color: '#9085e9', points: bwPts }], { unit: 'kg' });
 
@@ -956,12 +982,15 @@ function renderProfileAllenamento() {
       <div class="form-grid-3">
         <div class="form-row"><label>Riscald. (s)</label><input id="s-cardio" type="number" inputmode="numeric" value="${st.cardioSeconds}"></div>
         <div class="form-row"><label>Rest riscald.</label><input id="s-wurest" type="number" inputmode="numeric" value="${st.warmupRest}"></div>
-        <div class="form-row"><label>Incremento kg</label><input id="s-incr" type="text" inputmode="decimal" value="${String(st.smallIncrement).replace('.', ',')}"></div>
+        <div class="form-row"><label>Incr. nuovi es.</label><input id="s-incr" type="text" inputmode="decimal" value="${String(st.smallIncrement).replace('.', ',')}"></div>
       </div>
       <div class="form-row">
         <label class="check"><input id="s-autoprogress" type="checkbox" ${st.autoProgress ? 'checked' : ''}> Aggiorna automaticamente i pesi a fine seduta (progressione)</label>
       </div>
-      <div class="form-row"><label>Obiettivo sedute a settimana</label><input id="s-weekly-goal" type="number" inputmode="numeric" min="1" max="14" value="${st.weeklyGoal || 3}"></div>
+      <div class="form-grid-2">
+        <div class="form-row"><label>Sedute pesi a settimana</label><input id="s-weekly-goal" type="number" inputmode="numeric" min="1" max="14" value="${st.weeklyGoal || 3}"></div>
+        <div class="form-row"><label>Sessioni cardio a settimana</label><input id="s-weekly-cardio" type="number" inputmode="numeric" min="1" max="14" value="${st.weeklyCardioGoal || 2}"></div>
+      </div>
       <button class="btn secondary full" data-action="save-settings">Salva timer</button>
     </div>
 
@@ -1198,7 +1227,11 @@ function editExerciseModal(dayId, exId) {
     <h2>${isNew ? 'Nuovo esercizio' : 'Modifica esercizio'}</h2>
     <div class="form-row"><label>Nome (come vuoi chiamarlo tu)</label><input id="ee-name" value="${escAttr2(ex.name)}"></div>
     <div class="form-row"><label>Esercizio dal database (immagine + come si fa)</label><div id="ee-linkbox">${linkBoxHtml()}</div></div>
-    <div class="form-row"><label>Nota</label><input id="ee-note" value="${escAttr2(ex.note || '')}"></div>
+    <div class="form-grid-2">
+      <div class="form-row"><label>Nota</label><input id="ee-note" value="${escAttr2(ex.note || '')}"></div>
+      <div class="form-row"><label>Incremento (kg)</label><input id="ee-inc" type="text" inputmode="decimal" value="${String(ex.incKg || exIncrement(ex)).replace('.', ',')}"></div>
+    </div>
+    <p class="muted small" style="margin:-4px 0 12px">Quanto sale (o scende) il peso quando arrivi al massimo del range. Su macchine ed esercizi leggeri usa 1 kg o il passo della macchina.</p>
     <div class="form-grid-2">
       <div class="form-row"><label>Recupero</label>
         <select id="ee-rest">
@@ -1311,6 +1344,7 @@ function editExerciseModal(dayId, exId) {
     modal.querySelectorAll('[data-rowedit] [data-rf]').forEach(inp => inp.dispatchEvent(new Event('change')));
     ex.name = modal.querySelector('#ee-name').value.trim() || 'Esercizio';
     ex.note = modal.querySelector('#ee-note').value.trim();
+    ex.incKg = Math.max(0.25, parseNum(modal.querySelector('#ee-inc').value) || 2.5);
     ex.restCat = modal.querySelector('#ee-rest').value;
     ex.warmup = modal.querySelector('#ee-warmup').value;
     ex.muscles = tmpMuscles;
@@ -1601,6 +1635,7 @@ function handleAction(a, btn) {
     else if (a === 'go-cardio') { currentView = 'cardio'; syncTabs(); render(); window.scrollTo(0, 0); }
     else if (a === 'start-cardio') startCardioRunner(btn.dataset.cid);
     else if (a === 'edit-cardio') editCardioModal(btn.dataset.cid);
+    else if (a === 'cardio-history') cardioHistoryModal(btn.dataset.cid);
     else if (a === 'add-cardio') editCardioModal(null);
     else if (a === 'show-how') showHowToModal(btn.dataset.ex);
     else if (a === 'ex-history') exerciseHistoryModal(btn.dataset.ex);
@@ -1682,6 +1717,7 @@ function handleAction(a, btn) {
         saveState(); render();
       }
     }
+    else if (a === 'chart-range') { chartRange = btn.dataset.range || '6'; render(); }
     else if (a === 'prtab') { progressTab = btn.dataset.prtab || 'grafici'; render(); }
     else if (a === 'ptab') {
       profileTab = btn.dataset.ptab || 'profilo';
@@ -1720,6 +1756,7 @@ function handleAction(a, btn) {
       st.smallIncrement = parseNum($('#s-incr').value) || 2.5;
       st.autoProgress = $('#s-autoprogress').checked;
       st.weeklyGoal = Math.min(14, Math.max(1, parseInt($('#s-weekly-goal').value) || 3));
+      st.weeklyCardioGoal = Math.min(14, Math.max(1, parseInt($('#s-weekly-cardio').value) || 2));
       saveState(); render(); toast('Timer salvati ✓');
     }
     else if (a === 'save-deload') {
@@ -1841,3 +1878,25 @@ function onboardingModal() {
   });
 }
 if (!state.onboarded) setTimeout(onboardingModal, 300);
+else setTimeout(checkStaleSession, 300);
+
+/* Seduta rimasta aperta da un giorno precedente: chiedi cosa farne. */
+function checkStaleSession() {
+  const s = activeSession();
+  if (!s || s.date >= todayISO()) return;
+  const day = getDay(s.dayId);
+  const done = Object.values(s.entries).flat().filter(e => e.done).length;
+  const modal = openModal(`
+    <h2>Seduta ancora aperta</h2>
+    <p class="muted" style="margin-bottom:12px">La seduta <strong>${esc(day ? day.name : '')}</strong> del ${fmtDate(s.date)} non è stata terminata (${done} serie segnate).</p>
+    <div class="modal-actions" style="flex-direction:column">
+      ${done ? `<button class="btn full" id="st-finish">Salvala e chiudi</button>` : ''}
+      <button class="btn secondary full" id="st-resume">Continuala oggi</button>
+      <button class="btn danger full" id="st-discard">Scartala</button>
+    </div>
+  `);
+  const f = modal.querySelector('#st-finish');
+  if (f) f.addEventListener('click', () => { closeModal(); finishSession(); });
+  modal.querySelector('#st-resume').addEventListener('click', () => { s.date = todayISO(); saveState(); closeModal(); render(); });
+  modal.querySelector('#st-discard').addEventListener('click', () => { closeModal(); cancelSession(); });
+}
