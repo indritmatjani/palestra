@@ -91,15 +91,26 @@ async function syncPullInner() {
     if (row && row.data) {
       const remote = migrateState(row.data);
       remote.updatedAt = new Date(row.updated_at).getTime() || remote.updatedAt || 0;
-      const before = JSON.stringify(state);
+      // confronto i dati veri, senza l'ora di salvataggio (che cambia sempre)
+      const sig = st => JSON.stringify(Object.assign({}, st, { updatedAt: 0 }));
+      const countLogs = st => (st.cardio || []).reduce((n, c) => n + ((c.log || []).length), 0);
+      const before = sig(state);
+      const prevSessions = state.sessions.filter(x => x.completed).length;
+      const prevLogs = countLogs(state);
       const merged = syncMerge(state, remote);
-      syncApplyingRemote = true;
-      state = merged;
-      saveState();
-      syncApplyingRemote = false;
-      if (JSON.stringify(state) !== before) {
+      if (sig(merged) !== before) {
+        syncApplyingRemote = true;
+        state = merged;
+        saveState();
+        syncApplyingRemote = false;
         if (typeof render === 'function') render();
-        toast('Dati sincronizzati dal cloud ✓');
+        const newS = state.sessions.filter(x => x.completed).length - prevSessions;
+        const newC = countLogs(state) - prevLogs;
+        const parts = [];
+        if (newS > 0) parts.push(newS + (newS === 1 ? ' seduta' : ' sedute'));
+        if (newC > 0) parts.push(newC + ' cardio');
+        // avviso solo se sono arrivati allenamenti da un altro dispositivo
+        if (parts.length) toast('Dal cloud: ' + parts.join(' e ') + ' in più');
       }
       await syncPushNow(); // ripubblica lo stato fuso, così anche il cloud è allineato
     } else {

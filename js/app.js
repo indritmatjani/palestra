@@ -18,6 +18,8 @@ function applyTheme() {
   document.documentElement.setAttribute('data-theme', t);
   const meta = document.querySelector('meta[name="theme-color"]');
   if (meta) meta.setAttribute('content', t === 'light' ? '#f2f2f7' : '#000000');
+  const sb = document.querySelector('meta[name="apple-mobile-web-app-status-bar-style"]');
+  if (sb) sb.setAttribute('content', t === 'light' ? 'default' : 'black-translucent');
 }
 applyTheme();
 if (darkMQ) {
@@ -42,9 +44,20 @@ const ICON_INFO = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" s
 const ICON_MORE = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 
 // la barra in alto diventa visibile (sfocata, con bordo) solo quando la pagina scorre: come nelle app Apple
-window.addEventListener('scroll', () => {
-  document.body.classList.toggle('scrolled', window.scrollY > 4);
-}, { passive: true });
+function updateScrolled() {
+  const y = window.scrollY;
+  document.body.classList.toggle('scrolled', y > 4);       // barra sfocata con bordo
+  document.body.classList.toggle('title-hidden', y > 38);  // titolo grande uscito → titolo piccolo in alto
+}
+window.addEventListener('scroll', updateScrolled, { passive: true });
+
+// tastiera aperta: su iPhone le barre fisse "salgono" sopra la tastiera e coprono i campi → le nascondo
+document.addEventListener('focusin', e => {
+  if (e.target.matches('input:not([type="checkbox"]):not([type="color"]):not([type="file"]), select, textarea')) document.body.classList.add('kb-open');
+});
+document.addEventListener('focusout', () => {
+  setTimeout(() => { if (!document.activeElement || !document.activeElement.matches('input, select, textarea')) document.body.classList.remove('kb-open'); }, 80);
+});
 
 /* =================== TIMER =================== */
 const timer = { endAt: null, total: 0, label: '', interval: null, fired: false };
@@ -213,7 +226,8 @@ const VIEW_TITLES = { home: 'Palestra', workout: 'Allenamento', progress: 'Progr
 
 function render() {
   const name = (state.profile.name || '').trim();
-  $('#topbar-title').textContent = currentView === 'home' ? (name ? 'Ciao ' + name : 'Palestra') : VIEW_TITLES[currentView];
+  const title = currentView === 'home' ? (name ? 'Ciao ' + name : 'Palestra') : VIEW_TITLES[currentView];
+  $('#topbar-title').textContent = title;
   const action = $('#topbar-action');
   action.classList.add('hidden');
   if (currentView === 'workout') {
@@ -230,6 +244,9 @@ function render() {
   }
   else if (currentView === 'cardio') { v.innerHTML = renderCardio(); mountCardioCharts(); }
   else { v.innerHTML = renderProfile(); syncRenderStatus(); }
+  // titolo grande in stile iOS: scorre via con la pagina, poi compare piccolo nella barra
+  v.insertAdjacentHTML('afterbegin', `<h1 class="large-title">${esc(title)}</h1>`);
+  updateScrolled();
   // dissolvenza morbida solo al cambio di vista (non ad ogni aggiornamento interno)
   if (currentView !== lastRenderedView) {
     lastRenderedView = currentView;
