@@ -12,7 +12,7 @@ function lineChart(container, series, opts) {
   opts = opts || {};
   const unit = opts.unit || '';
   const W = 560, H = opts.height || 260;
-  const padL = 42, padR = 14, padT = 14, padB = 30;
+  const padL = 54, padR = 16, padT = 16, padB = 38;
 
   const allPts = series.flatMap(s => s.points);
   if (!allPts.length) {
@@ -51,19 +51,20 @@ function lineChart(container, series, opts) {
   for (const d of deloadDates) {
     const x = xPos(d);
     g += `<rect x="${(x - bandW / 2).toFixed(1)}" y="${padT}" width="${bandW.toFixed(1)}" height="${(H - padT - padB).toFixed(1)}" fill="rgba(201,133,0,0.16)"/>`;
-    g += `<text x="${x.toFixed(1)}" y="${padT + 9}" text-anchor="middle" font-size="11">🪶</text>`;
+    g += `<text x="${x.toFixed(1)}" y="${padT + 14}" text-anchor="middle" font-size="16">🪶</text>`;
   }
   // griglia + etichette Y
   for (const t of ticks) {
     const y = yPos(t);
     g += `<line x1="${padL}" y1="${y}" x2="${W - padR}" y2="${y}" style="stroke:var(--grid)" stroke-width="1"/>`;
-    g += `<text x="${padL - 6}" y="${y + 3.5}" text-anchor="end" style="fill:var(--ink-muted)" font-size="10">${fmtKg(Math.round(t * 10) / 10)}</text>`;
+    g += `<text x="${padL - 8}" y="${y + 5.5}" text-anchor="end" style="fill:var(--ink-muted)" font-size="16">${fmtKg(Math.round(t * 10) / 10)}</text>`;
   }
   // etichette X (max ~5)
-  const xEvery = Math.max(1, Math.ceil(dates.length / 5));
+  const xEvery = Math.max(1, Math.ceil(dates.length / 4));
   dates.forEach((d, i) => {
     if (i % xEvery === 0 || i === dates.length - 1) {
-      g += `<text x="${xPos(d)}" y="${H - 8}" text-anchor="middle" style="fill:var(--ink-muted)" font-size="10">${fmtDate(d)}</text>`;
+      const anchor = dates.length > 1 && i === 0 ? 'start' : (dates.length > 1 && i === dates.length - 1 ? 'end' : 'middle');
+      g += `<text x="${xPos(d)}" y="${H - 10}" text-anchor="${anchor}" style="fill:var(--ink-muted)" font-size="15">${fmtDate(d)}</text>`;
     }
   });
   // baseline
@@ -74,17 +75,17 @@ function lineChart(container, series, opts) {
     const pts = [...s.points].sort((a, b) => (a.x < b.x ? -1 : 1));
     if (!pts.length) return;
     const d = pts.map((p, i) => (i === 0 ? 'M' : 'L') + xPos(p.x).toFixed(1) + ',' + yPos(p.y).toFixed(1)).join(' ');
-    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>`;
+    g += `<path d="${d}" fill="none" stroke="${s.color}" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>`;
     pts.forEach(p => {
       const dotColor = p.deload ? '#c98500' : s.color;
       const tip = (p.label ? p.label + ' — ' : '') + fmtKg(p.y) + ' ' + unit + ' · ' + fmtDate(p.x) + (p.deload ? ' · 🪶 scarico' : '');
       // cerchio invisibile più grande: area di tocco comoda col dito
-      g += `<circle cx="${xPos(p.x).toFixed(1)}" cy="${yPos(p.y).toFixed(1)}" r="14" fill="transparent" data-tip="${escAttr(tip)}"/>`;
-      g += `<circle cx="${xPos(p.x).toFixed(1)}" cy="${yPos(p.y).toFixed(1)}" r="4.5" fill="${dotColor}" style="stroke:var(--surface)" stroke-width="2" pointer-events="none"/>`;
+      g += `<circle cx="${xPos(p.x).toFixed(1)}" cy="${yPos(p.y).toFixed(1)}" r="20" fill="transparent" data-tip="${escAttr(tip)}"/>`;
+      g += `<circle cx="${xPos(p.x).toFixed(1)}" cy="${yPos(p.y).toFixed(1)}" r="6.5" fill="${dotColor}" style="stroke:var(--surface)" stroke-width="2.5" pointer-events="none"/>`;
     });
     // etichetta diretta ultimo punto
     const lp = pts[pts.length - 1];
-    g += `<text x="${Math.min(xPos(lp.x) + 8, W - 4)}" y="${yPos(lp.y) - 8}" style="fill:var(--ink)" font-size="11" font-weight="600" text-anchor="end">${fmtKg(lp.y)}</text>`;
+    g += `<text x="${Math.min(xPos(lp.x) + 8, W - 4)}" y="${yPos(lp.y) - 12}" style="fill:var(--ink)" font-size="18" font-weight="700" text-anchor="end">${fmtKg(lp.y)}</text>`;
   });
 
   container.innerHTML = `

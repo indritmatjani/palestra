@@ -806,9 +806,12 @@ function applyProgression(session) {
       }
 
       // range: come riferimento uso il peso più alto tra le serie completate (non la prima)
-      const bestReps = Math.max(...entries.map(e => e.reps || 0));
+      // riferimento = la serie più pesante, e le rep fatte CON quel peso
+      // (prima si prendevano peso massimo e rep massime anche da serie diverse)
       const kgs = entries.map(e => e.kg).filter(k => k != null);
       const lastKg = kgs.length ? Math.max(...kgs) : r.weight;
+      const atTop = kgs.length ? entries.filter(e => e.kg === lastKg) : entries;
+      const bestReps = Math.max(...atTop.map(e => e.reps || 0));
       const inc = state.settings.smallIncrement || 2.5;
       // tetto di carico raggiunto (es. macchina a 93 kg): si cresce a ripetizioni
       if (r.maxWeight && lastKg >= r.maxWeight && bestReps >= r.repMax) {

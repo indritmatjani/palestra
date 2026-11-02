@@ -628,7 +628,7 @@ function renderExercise(ex, index, day, session) {
 
   // riscaldamento
   if (ex.warmup && ex.warmup !== 'none') {
-    const s1 = ex.rows[0] ? ex.rows[0].weight : 0;
+    const s1 = ex.rows[0] ? effectiveWeight(ex.rows[0].weight) : 0; // in settimana di scarico: sul peso ridotto
     const steps = warmupSteps(ex.warmup, s1);
     if (steps.length && s1 > 0) {
       html += `<div class="warmup-box">
