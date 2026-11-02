@@ -682,3 +682,51 @@ details.warmup-box { padding: 8px 12px; }
 /* ---------- iOS: tastiera, tocco prolungato ---------- */
 body.kb-open #tabbar, body.kb-open #timerbar { display: none; }
 img, button, .tab { -webkit-touch-callout: none; }
+
+/* ---------- Allenamento: inizio in alto, barra seduta fissa ---------- */
+.day-head { margin-bottom: 14px; }
+.session-bar {
+  position: sticky; top: calc(44px + var(--safe-top)); z-index: 15;
+  margin: 0 -16px 14px; padding: 10px 16px 0;
+  background: var(--bar-bg);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
+  border-bottom: .5px solid var(--border);
+}
+.session-bar-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.session-bar .session-progress { margin: 8px -16px 0; height: 3px; border-radius: 0; }
+.session-bar .session-progress > div { border-radius: 0; }
+.btn-mini.good { background: var(--good); color: #fff; }
+
+/* ---------- Mobile: aree di tocco più grandi (Apple consiglia almeno 44px) ---------- */
+.icon-btn { width: 44px; height: 44px; }
+.ex-tools { margin-right: -6px; }
+.btn-mini { min-height: 40px; padding: 0 14px; }
+.seg button { min-height: 40px; }
+.seg.seg-sm button { min-height: 36px; }
+.chip { min-height: 40px; }
+.chip.static { min-height: 30px; }
+.timer-actions .btn-mini { min-height: 44px; }
+.md-row { grid-template-columns: 34px 1fr 44px 44px 44px 44px; gap: 4px; }
+/* schermi stretti (iPhone SE): meno margini, numeri un filo più piccoli */
+@media (max-width: 360px) {
+  #view { padding-left: 12px; padding-right: 12px; }
+  .session-bar { margin-left: -12px; margin-right: -12px; padding-left: 12px; padding-right: 12px; }
+  .card, .tile, .home-card, .chart-box { padding: 14px; }
+  .ex-thumb { width: 44px; height: 44px; }
+  .large-title { font-size: 1.9rem; }
+  .set-row { grid-template-columns: 18px minmax(56px, 1fr) auto 44px; gap: 6px; }
+  .rep-stepper input { width: 40px; }
+  .step-btn { width: 36px; }
+  .tile-title { font-size: 1.3rem; }
+}
+.btn-mini { min-width: 40px; }
+.seg.seg-sm button { min-height: 40px; }
+@media (max-width: 360px) {
+  .session-bar .session-progress { margin-left: -12px; margin-right: -12px; }
+  .step-btn { width: 40px; }
+  .rep-stepper input { width: 34px; }
+}
+/* i riquadri dei giorni si dividono lo spazio (con molti giorni si scorre in orizzontale) */
+.day-pill { min-width: 84px; overflow: hidden; flex-basis: 0; }
+.day-select.compact .day-pill { flex: 0 0 52px; min-width: 52px; }

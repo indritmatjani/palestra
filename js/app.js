@@ -553,6 +553,7 @@ function renderWorkout() {
 
   let html = '';
 
+  const nSets = day.exercises.reduce((n, ex) => n + ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0), 0);
   if (!session) {
     html += `<div class="day-select">` + state.days.map(d => {
       const active = d.id === dayId;
@@ -561,18 +562,32 @@ function renderWorkout() {
         <span class="day-sub">${esc(dayMusclesShort(d))}</span>
       </button>`;
     }).join('') + `</div>`;
-    html += `<div class="row-between" style="margin:-4px 0 14px">
-      <div class="small strong">${esc(day.name)}</div>
-      <button class="btn-ghost" data-action="manage-days">Gestisci giorni</button>
+    // intestazione del giorno con il pulsante per iniziare SUBITO in alto
+    html += `<div class="card day-head card-accent" style="--day:${day.color}">
+      <div class="row-between">
+        <div style="min-width:0">
+          <div class="card-title">${esc(day.name)}</div>
+          <div class="muted">${day.exercises.length} esercizi · ${nSets} serie</div>
+        </div>
+        <button class="btn-ghost" data-action="manage-days">Giorni</button>
+      </div>
+      ${day.exercises.length ? `<button class="btn full" style="margin-top:12px;background:${day.color}" data-action="start-session" data-day="${day.id}">Inizia ${esc(day.name)}</button>` : `<p class="muted small" style="margin-top:10px">Tocca "Modifica" in alto per aggiungere esercizi.</p>`}
     </div>`;
   } else {
     const all = Object.values(session.entries).flat();
     const done = all.filter(e => e.done).length;
     const pct = all.length ? Math.round((done / all.length) * 100) : 0;
-    html += `<div class="card card-accent" style="--day:${day.color}">
-      <div class="row-between">
-        <div><div class="card-title">Seduta in corso — ${esc(day.name)}</div><div class="muted">${fmtDate(session.date)} · ${done}/${all.length} serie</div></div>
-        <button class="btn-mini danger" data-action="cancel-session">Annulla</button>
+    // barra della seduta: resta in alto mentre scorri, con "Termina" sempre a portata di pollice
+    html += `<div class="session-bar" style="--day:${day.color}">
+      <div class="session-bar-top">
+        <div style="min-width:0">
+          <div class="card-title">${esc(day.name)}</div>
+          <div class="muted">${done}/${all.length} serie · ${pct}%</div>
+        </div>
+        <div class="row-gap">
+          <button class="btn-mini danger" data-action="cancel-session">Annulla</button>
+          <button class="btn-mini good" data-action="finish-session">Termina</button>
+        </div>
       </div>
       <div class="session-progress"><div style="width:${pct}%;background:${day.color}"></div></div>
     </div>`;
@@ -602,9 +617,7 @@ function renderWorkout() {
     html += `<button class="btn secondary full" data-action="add-exercise" data-day="${day.id}">+ Aggiungi esercizio</button>`;
   }
 
-  if (!session) {
-    html += `<button class="btn full" style="margin-top:10px;background:${day.color}" data-action="start-session" data-day="${day.id}">Inizia seduta ${esc(day.name)}</button>`;
-  } else {
+  if (session) {
     html += `<button class="btn full good" style="margin-top:10px" data-action="finish-session">Termina seduta</button>`;
   }
 
