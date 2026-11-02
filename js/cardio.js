@@ -334,7 +334,10 @@ function askDistanceThenLog(c, durationSec) {
     closeModal(); showCardioSummary(c, null, durationSec, tip);
   };
   modal.querySelector('#cd-skip').addEventListener('click', () => save(null));
-  modal.querySelector('#cd-save').addEventListener('click', () => save(parseNum(modal.querySelector('#cd-dist').value)));
+  modal.querySelector('#cd-save').addEventListener('click', () => {
+    const km = parseNum(modal.querySelector('#cd-dist').value);
+    save(km != null && km > 0 && km < 200 ? km : null); // km negativi o assurdi: non registrati
+  });
 }
 
 function showCardioSummary(c, roundsDone, totalSec, tip) {

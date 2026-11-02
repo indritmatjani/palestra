@@ -1349,8 +1349,10 @@ function editExerciseModal(dayId, exId) {
           const f = inp.dataset.rf;
           if (f === 'label') tmpRows[i].label = inp.value;
           else if (f === 'type') { tmpRows[i].type = inp.value; rerenderRows(); }
-          else if (f === 'weight' || f === 'russoIncrement' || f === 'maxWeight') tmpRows[i][f] = parseNum(inp.value) || 0;
-          else tmpRows[i][f] = parseInt(inp.value) || 0;
+          else if (f === 'weight' || f === 'russoIncrement' || f === 'maxWeight') tmpRows[i][f] = Math.max(0, Math.min(1000, parseNum(inp.value) || 0));
+          else if (f === 'schemeIndex') tmpRows[i][f] = Math.max(0, Math.min(RUSSO_SCHEME.length - 1, parseInt(inp.value) || 0));
+          else if (f === 'sets') tmpRows[i][f] = Math.max(1, Math.min(20, parseInt(inp.value) || 1));
+          else tmpRows[i][f] = Math.max(1, Math.min(100, parseInt(inp.value) || 1)); // repMin / repMax
         });
       });
       const del = box.querySelector('[data-delrow]');
@@ -1421,6 +1423,7 @@ function editExerciseModal(dayId, exId) {
     ex.restCat = modal.querySelector('#ee-rest').value;
     ex.warmup = modal.querySelector('#ee-warmup').value;
     ex.muscles = tmpMuscles;
+    tmpRows.forEach(r => { if (r.repMin > r.repMax) [r.repMin, r.repMax] = [r.repMax, r.repMin]; });
     ex.rows = tmpRows;
     ex.dsId = tmpDs.dsId; ex.dsMedia = tmpDs.dsMedia; ex.dsName = tmpDs.dsName;
     if (isNew) day.exercises.push(ex);
@@ -1681,8 +1684,11 @@ function bindView() {
       const arr = s.entries[inp.dataset.entry]; if (!arr) return;
       const e = arr[parseInt(inp.dataset.i)]; if (!e) return;
       const val = parseNum(inp.value);
-      if (inp.dataset.field === 'kg') e.kg = val != null ? fromDisplayWeight(val) : null; // input in unità scelta → salvo in kg
-      else e.reps = val != null ? Math.round(val) : null;
+      // numeri non validi o negativi non vengono accettati (es. "-5")
+      const ok = val != null && isFinite(val) && val >= 0;
+      if (inp.dataset.field === 'kg') e.kg = ok ? Math.min(1000, fromDisplayWeight(val)) : (inp.value.trim() === '' ? null : e.kg);
+      else e.reps = ok ? Math.min(9999, Math.round(val)) : (inp.value.trim() === '' ? null : e.reps);
+      if (!ok && inp.value.trim() !== '') { inp.value = inp.dataset.field === 'kg' ? (e.kg != null ? String(toDisplayWeight(e.kg)).replace('.', ',') : '') : (e.reps != null ? e.reps : ''); toast('Inserisci un numero positivo'); }
       saveState();
     });
   });
@@ -1822,9 +1828,11 @@ function handleAction(a, btn) {
     }
     else if (a === 'save-profile') {
       state.profile.name = $('#p-name').value.trim();
-      state.profile.age = parseNum($('#p-age').value);
-      state.profile.height = parseNum($('#p-height').value);
-      const bw = parseNum($('#p-bw').value);
+      const age = parseNum($('#p-age').value), h = parseNum($('#p-height').value);
+      state.profile.age = age != null && age > 0 && age < 120 ? Math.round(age) : null;
+      state.profile.height = h != null && h > 50 && h < 260 ? h : null;
+      let bw = parseNum($('#p-bw').value);
+      if (bw != null && !(bw > 20 && bw < 400)) { toast('Peso corporeo non valido'); bw = null; }
       if (bw != null) {
         state.profile.bodyWeight = bw;
         const log = state.profile.bodyWeightLog || (state.profile.bodyWeightLog = []);
