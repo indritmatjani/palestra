@@ -52,29 +52,46 @@ function beepEnd() { for (let i = 0; i < 5; i++) cTone(700 + i * 120, 0.22, i * 
 function beepCount() { cTone(760, 0.09, 0, 0.3); vibr(70); }                                    // ultimi 3 secondi
 
 /* =================== VISTA CARDIO =================== */
+/* Testo di progressione mostrato sulla card: cosa ti aspetta e come cresce. */
+function cardioGoalText(c) {
+  if (c.type === 'interval' && c.mode === 'fixedtime') {
+    if (c.restSec <= 0) return { big: fmtClock(c.totalSec), unit: 'continuo', sub: 'Completalo e il tempo sale di 1 min' };
+    return { big: c.workSec + 's / ' + c.restSec + 's', unit: '× ' + cardioRounds(c), sub: fmtClock(c.totalSec) + ' fissi · completali e il lavoro sale di ' + (c.stepSec || 5) + 's' };
+  }
+  if (c.type === 'interval') return { big: String(c.rounds), unit: 'round', sub: c.workSec + 's lavoro / ' + c.restSec + 's riposo' };
+  if (c.type === 'steady') {
+    const sub = c.pendingTarget
+      ? 'Settimana completata ✓ · da lunedì ' + c.pendingTarget + ' min'
+      : 'Completalo questa settimana: da lunedì ' + nextWeeklyTarget(c.targetMin) + ' min';
+    return { big: String(c.targetMin), unit: 'min', sub: c.autoProgress ? sub : 'Obiettivo fisso' };
+  }
+  return { big: '—', unit: '', sub: 'Cronometro libero' };
+}
+
 function renderCardio() {
+  let changed = false;
+  for (const c of (state.cardio || [])) if (applyCardioWeek(c)) changed = true;
+  if (changed) saveState();
   if (!state.cardio || !state.cardio.length) {
     return `<div class="card"><p class="muted">Nessuna attività cardio.</p></div>
-      <button class="btn full" data-action="add-cardio">+ Aggiungi cardio</button>`;
+      <button class="btn full" data-action="add-cardio">Aggiungi attività</button>`;
   }
   const cards = state.cardio.map(c => {
     const last = cardioLastText(c);
-    const typeLabel = c.type === 'interval' ? 'HIIT intervalli' : c.type === 'steady' ? 'Continuo' : 'Cronometro';
-    return `<div class="card card-accent" style="--day:${c.color}">
+    const g = cardioGoalText(c);
+    return `<div class="card cardio-card" style="--day:${c.color}">
       <div class="row-between">
-        <div style="min-width:0">
-          <div class="card-title">${esc(c.name)}</div>
-          <div class="muted">${typeLabel} · ${esc(cardioSummary(c))}${c.note ? ' · ' + esc(c.note) : ''}</div>
-        </div>
-        <button class="icon-btn" data-action="edit-cardio" data-cid="${c.id}" title="Modifica" aria-label="Modifica">✎</button>
+        <div class="cardio-name"><span class="dot"></span>${esc(c.name)}</div>
+        <button class="icon-btn" data-action="edit-cardio" data-cid="${c.id}" aria-label="Modifica">⋯</button>
       </div>
-      ${last ? `<div class="cardio-last">📌 Ultima volta — ${esc(last)}</div>`
-             : `<div class="muted small" style="margin:6px 0">Ancora nessuna sessione registrata.</div>`}
-      <div id="cardio-chart-${c.id}" style="margin:8px 0"></div>
-      <button class="btn full" style="background:${c.color}" data-action="start-cardio" data-cid="${c.id}">▶ Avvia</button>
+      <div class="cardio-goal"><span class="big">${esc(g.big)}</span><span class="unit">${esc(g.unit)}</span></div>
+      <div class="muted">${esc(g.sub)}</div>
+      ${last ? `<div class="cardio-last">Ultima volta · ${esc(last)}</div>` : ''}
+      <div id="cardio-chart-${c.id}" class="cardio-chart"></div>
+      <button class="btn full" style="background:${c.color}" data-action="start-cardio" data-cid="${c.id}">Avvia</button>
     </div>`;
   }).join('');
-  return cards + `<button class="btn secondary full" data-action="add-cardio">+ Aggiungi cardio</button>`;
+  return cards + `<button class="btn secondary full" data-action="add-cardio">Aggiungi attività</button>`;
 }
 
 function cardioSeries(c) {
@@ -109,6 +126,7 @@ function closeFullscreen(el) { if (el && el.parentNode) el.parentNode.removeChil
 function startCardioRunner(cid) {
   const c = getCardio(cid);
   if (!c) return;
+  if (applyCardioWeek(c)) saveState();
   // sblocca l'audio col tocco dell'utente
   try { if (!cardioAudio) cardioAudio = new (window.AudioContext || window.webkitAudioContext)(); if (cardioAudio.state === 'suspended') cardioAudio.resume(); } catch (e) {}
   if (c.type === 'interval') runInterval(c);
@@ -201,8 +219,17 @@ function runInterval(c) {
     if (st.paused) { st.pausedRemain = st.phaseEnd - Date.now(); e.target.textContent = 'Riprendi'; }
     else { st.phaseEnd = Date.now() + st.pausedRemain; e.target.textContent = 'Pausa'; }
   });
-  fs.querySelector('#ci-stop').addEventListener('click', () => { if (st.roundsDone > 0) finish(); else quit(); });
-  fs.querySelector('#ci-x').addEventListener('click', () => { if (st.roundsDone > 0) finish(); else quit(); });
+  const stopEarly = () => {
+    // nel continuo i round "fatti" si contano dal tempo saltato
+    if (continuous && st.phase === 'work') {
+      const left = st.paused ? st.pausedRemain : (st.phaseEnd - Date.now());
+      const workedSec = Math.max(0, contTotal - Math.max(0, left) / 1000);
+      st.roundsDone = Math.floor(workedSec / Math.max(1, c.workSec));
+    }
+    if (st.roundsDone > 0) finish(); else quit();
+  };
+  fs.querySelector('#ci-stop').addEventListener('click', stopEarly);
+  fs.querySelector('#ci-x').addEventListener('click', stopEarly);
 }
 
 /* =================== RUNNER CONTINUO / CRONOMETRO =================== */
@@ -273,9 +300,9 @@ function showCardioSummary(c, roundsDone, totalSec, tip) {
        <div class="progress-change"><span>Tempo totale</span><span>${fmtClock(totalSec)}</span></div>`
     : `<div class="progress-change"><span>Durata</span><span class="up">${fmtClock(totalSec)}</span></div>`;
   openModal(`
-    <h2>Cardio completato 🔥</h2>
+    <h2>Cardio completato</h2>
     ${body}
-    ${tip ? `<p class="suggestion-note" style="margin-top:10px">▲ ${esc(tip)}</p>` : ''}
+    ${tip ? `<p class="suggestion-note" style="margin-top:10px">${esc(tip)}</p>` : ''}
     <div class="modal-actions"><button class="btn" data-close>OK</button></div>
   `);
   render();
@@ -284,9 +311,9 @@ function showCardioSummary(c, roundsDone, totalSec, tip) {
 /* =================== MODIFICA / AGGIUNGI ATTIVITÀ =================== */
 function editCardioModal(cid) {
   const isNew = !cid;
-  const c = isNew ? cardioActivity('Nuovo cardio', 'interval', { color: '#eda100', autoProgress: true }) : getCardio(cid);
+  const c = isNew ? cardioActivity('Nuova attività', 'steady', { color: '#0a84ff', autoProgress: true, trackDistance: true }) : getCardio(cid);
   const modal = openModal(`
-    <h2>${isNew ? 'Nuovo cardio' : 'Modifica cardio'}</h2>
+    <h2>${isNew ? 'Nuova attività' : 'Modifica attività'}</h2>
     <div class="form-grid-2">
       <div class="form-row"><label>Nome</label><input id="cc-name" value="${escAttr2(c.name)}"></div>
       <div class="form-row"><label>Colore</label><input id="cc-color" type="color" value="${c.color}"></div>
@@ -312,13 +339,13 @@ function editCardioModal(cid) {
         <div class="form-row" id="cc-rounds-wrap" style="${c.mode === 'fixedtime' ? 'display:none' : ''}"><label>Round</label><input id="cc-rounds" type="number" inputmode="numeric" value="${c.rounds}"></div>
         <div class="form-row" id="cc-total-wrap" style="${c.mode !== 'fixedtime' ? 'display:none' : ''}"><label>Tempo tot. (min)</label><input id="cc-total" type="number" inputmode="numeric" value="${Math.round((c.totalSec || 600) / 60)}"></div>
       </div>
-      <p class="muted small" id="cc-fixhint" style="${c.mode !== 'fixedtime' ? 'display:none' : ''}">Il round dura lavoro+riposo (${(c.workSec + c.restSec)}s); a ogni completamento sposta ${c.stepSec || 5}s dal riposo al lavoro, mantenendo fisso il tempo totale, fino a saltare in continuo.</p>
+      <p class="muted small" id="cc-fixhint" style="${c.mode !== 'fixedtime' ? 'display:none' : ''}">Il round dura lavoro+riposo (${(c.workSec + c.restSec)}s). A ogni completamento ${c.stepSec || 5}s passano dal riposo al lavoro, a tempo totale fisso, fino al continuo. Poi, a ogni continuo completato, il tempo totale sale di 1 minuto.</p>
     </div>
     <div id="cc-steady" class="form-grid-2" style="${c.type !== 'steady' ? 'display:none' : ''}">
-      <div class="form-row"><label>Obiettivo (min)</label><input id="cc-target" type="number" inputmode="numeric" value="${c.targetMin}"></div>
-      <div class="form-row"><label class="check" style="margin-top:22px"><input id="cc-dist" type="checkbox" ${c.trackDistance ? 'checked' : ''}> Registra distanza</label></div>
+      <div class="form-row"><label>Obiettivo attuale (min)</label><input id="cc-target" type="number" inputmode="numeric" value="${c.targetMin}"></div>
+      <div class="form-row"><label class="check" style="margin-top:22px"><input id="cc-dist" type="checkbox" ${c.trackDistance ? 'checked' : ''}> Chiedi i km</label></div>
     </div>
-    <div class="form-row"><label class="check"><input id="cc-auto" type="checkbox" ${c.autoProgress ? 'checked' : ''}> Progressione automatica (aumenta round/tempo quando completi)</label></div>
+    <div class="form-row"><label class="check"><input id="cc-auto" type="checkbox" ${c.autoProgress ? 'checked' : ''}> Progressione automatica</label><p class="muted small" style="margin-top:4px">Continuo: +10% a settimana quando completi l'obiettivo. Intervalli: cresce il lavoro (o i round) quando completi.</p></div>
     <div class="modal-actions">
       ${!isNew ? `<button class="btn danger" id="cc-del">Elimina</button>` : ''}
       <button class="btn secondary" data-close>Annulla</button>
@@ -361,7 +388,9 @@ function editCardioModal(cid) {
     } else {
       c.rounds = Math.max(1, parseInt(modal.querySelector('#cc-rounds').value) || 8);
     }
-    c.targetMin = Math.max(1, parseInt(modal.querySelector('#cc-target').value) || 20);
+    const newTarget = Math.max(1, parseInt(modal.querySelector('#cc-target').value) || 20);
+    if (newTarget !== c.targetMin) { c.pendingTarget = null; c.progressWeek = null; }
+    c.targetMin = newTarget;
     c.trackDistance = modal.querySelector('#cc-dist').checked;
     c.autoProgress = modal.querySelector('#cc-auto').checked;
     if (isNew) state.cardio.push(c);

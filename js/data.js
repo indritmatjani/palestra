@@ -273,11 +273,9 @@ function defaultState() {
         mode: 'fixedtime', totalSec: 600, roundSec: 30, workSec: 10, restSec: 20, stepSec: 5,
         rounds: 20, autoProgress: true,
       }),
-      cardioActivity('Corsa', 'steady', {
-        color: '#e34948', note: 'Corsa continua',
-        targetMin: 20, trackDistance: true, autoProgress: true,
-      }),
+      ...defaultSteadyCardio(),
     ],
+    cardioSeeded: true,
   };
 }
 
@@ -296,8 +294,48 @@ function cardioActivity(name, type, opts) {
     mode: 'rounds', workSec: 20, restSec: 10, rounds: 8,
     totalSec: 600, roundSec: 30, stepSec: 5,
     targetMin: 20, trackDistance: false,
+    // continuo (corsa/bici): progressione +10% a settimana
+    pendingTarget: null,   // nuovo obiettivo che parte dal lunedì successivo
+    progressWeek: null,    // settimana (lunedì YYYY-MM-DD) in cui l'obiettivo è stato completato
     autoProgress: false, log: [],
   }, opts);
+}
+
+/* Attività continue predefinite: tapis roulant e cyclette (in palestra). */
+function defaultSteadyCardio() {
+  return [
+    cardioActivity('Tapis roulant', 'steady', {
+      color: '#ff375f', note: 'Corsa · +10% a settimana',
+      targetMin: 15, trackDistance: true, autoProgress: true,
+    }),
+    cardioActivity('Cyclette', 'steady', {
+      color: '#30b0c7', note: 'Bici · +10% a settimana',
+      targetMin: 20, trackDistance: true, autoProgress: true,
+    }),
+  ];
+}
+
+/* Chiave della settimana: il lunedì in formato YYYY-MM-DD (confrontabile come stringa). */
+function isoWeekKey(dateISO) {
+  const d = new Date(dateISO + 'T00:00:00');
+  const day = (d.getDay() + 6) % 7; // lun=0
+  d.setDate(d.getDate() - day);
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+/* Obiettivo della settimana successiva: +10%, almeno +1 minuto. */
+function nextWeeklyTarget(min) {
+  return Math.max(min + 1, Math.ceil(min * 1.1));
+}
+
+/* Se è iniziata una nuova settimana, applica l'obiettivo guadagnato la settimana prima.
+   Ritorna true se qualcosa è cambiato. */
+function applyCardioWeek(c) {
+  if (!c || c.type !== 'steady' || !c.pendingTarget || !c.progressWeek) return false;
+  if (isoWeekKey(todayISO()) <= c.progressWeek) return false;
+  c.targetMin = c.pendingTarget;
+  c.pendingTarget = null;
+  return true;
 }
 
 /* Per gli interval a tempo fisso: numero di round = tempo totale / durata round */
@@ -320,7 +358,7 @@ function cardioSummary(c) {
     const tot = c.rounds * (c.workSec + c.restSec);
     return c.rounds + ' round · ' + c.workSec + 's/' + c.restSec + 's · ' + fmtClock(tot);
   }
-  if (c.type === 'steady') return c.targetMin + ' min' + (c.trackDistance ? ' · con distanza' : '');
+  if (c.type === 'steady') return 'Obiettivo ' + c.targetMin + ' min' + (c.pendingTarget ? ' · da lunedì ' + c.pendingTarget + ' min' : '');
   return 'Cronometro libero';
 }
 
@@ -365,14 +403,22 @@ function logCardio(id, entry) {
           ? 'Completato! La prossima volta: ' + c.workSec + 's lavoro / ' + c.restSec + 's riposo (stesso tempo totale).'
           : '🔥 Traguardo: la prossima volta salti in CONTINUO per ' + fmtClock(c.totalSec) + '!';
       } else if (entry.roundsDone >= target && c.restSec <= 0) {
-        tip = 'Sei già al continuo per ' + fmtClock(c.totalSec) + '. Ottimo!';
+        // già al continuo: si allunga il tempo totale di 1 minuto
+        c.totalSec = (c.totalSec || 600) + 60;
+        c.rounds = cardioRounds(c);
+        tip = 'Continuo completato! La prossima volta: ' + fmtClock(c.totalSec) + ' in continuo.';
       }
     } else if (c.type === 'interval' && entry.roundsDone >= c.rounds) {
       c.rounds += 1;
       tip = 'Completato! La prossima volta: ' + c.rounds + ' round.';
     } else if (c.type === 'steady' && entry.durationSec >= c.targetMin * 60) {
-      c.targetMin += 1;
-      tip = 'Obiettivo raggiunto! La prossima volta: ' + c.targetMin + ' min.';
+      // +10% a settimana: l'obiettivo nuovo parte dal lunedì successivo
+      const wk = isoWeekKey(entry.date);
+      if (c.progressWeek !== wk || !c.pendingTarget) {
+        c.pendingTarget = nextWeeklyTarget(c.targetMin);
+        c.progressWeek = wk;
+      }
+      tip = 'Obiettivo della settimana completato! Da lunedì: ' + c.pendingTarget + ' min (+10%). Fino ad allora resta ' + c.targetMin + ' min.';
     }
   }
   saveState();
@@ -406,6 +452,14 @@ function migrateState(s) {
     if (!Array.isArray(d.exercises)) d.exercises = [];
   });
   if (!Array.isArray(s.cardio)) s.cardio = def.cardio;
+  // aggiunge una sola volta tapis roulant e cyclette (se non esistono già attività simili)
+  if (!s.cardioSeeded) {
+    const has = re => s.cardio.some(c => re.test(c.name || ''));
+    const [tread, bike] = defaultSteadyCardio();
+    if (!has(/corsa|tapis|run/i)) s.cardio.push(tread);
+    if (!has(/bici|cyclette|bike/i)) s.cardio.push(bike);
+    s.cardioSeeded = true;
+  }
   s.cardio.forEach(c => {
     if (!Array.isArray(c.log)) c.log = [];
     if (!c.color) c.color = '#3987e5';
@@ -413,6 +467,9 @@ function migrateState(s) {
     if (c.roundSec == null) c.roundSec = (c.workSec || 20) + (c.restSec || 10);
     if (c.totalSec == null) c.totalSec = (c.rounds || 8) * ((c.workSec || 20) + (c.restSec || 10));
     if (c.stepSec == null) c.stepSec = 5;
+    if (c.pendingTarget === undefined) c.pendingTarget = null;
+    if (c.progressWeek === undefined) c.progressWeek = null;
+    applyCardioWeek(c);
   });
   if (!s.settings.deload) s.settings.deload = def.settings.deload;
   // migrazione recuperi: chi aveva i VECCHI default (russo 360 / pesante 210)

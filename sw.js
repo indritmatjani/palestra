@@ -1,6 +1,6 @@
 /* ============ Service worker: offline + aggiornamento automatico ============
    Cambia VERSION a ogni rilascio: il telefono scarica i file nuovi e si ricarica da solo. */
-const VERSION = 'palestra-v2.0.0';
+const VERSION = 'palestra-v2.1.0';
 const APP_CACHE = VERSION + '-app';
 const MEDIA_CACHE = 'palestra-media-v1'; // immagini esercizi: restano tra una versione e l'altra
 

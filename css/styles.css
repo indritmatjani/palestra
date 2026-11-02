@@ -119,17 +119,22 @@ p { margin: 0 0 8px; }
 #topbar {
   position: sticky; top: 0; z-index: 20;
   display: flex; align-items: center; justify-content: space-between;
-  min-height: calc(52px + var(--safe-top));
+  min-height: calc(56px + var(--safe-top));
   padding: var(--safe-top) 16px 0;
+  background: var(--bg);
+  border-bottom: .5px solid transparent;
+  transition: background .2s, border-color .2s;
+}
+body.scrolled #topbar {
   background: var(--bar-bg);
   -webkit-backdrop-filter: saturate(180%) blur(20px);
   backdrop-filter: saturate(180%) blur(20px);
-  border-bottom: .5px solid var(--border);
+  border-bottom-color: var(--border);
 }
-#topbar-title { font-size: 1.35rem; font-weight: 750; margin: 0; letter-spacing: -.02em; }
+#topbar-title { font-size: 2rem; font-weight: 750; margin: 0; letter-spacing: -.025em; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 #view {
-  padding: 16px 16px calc(var(--tabbar-h) + var(--safe-bottom) + 24px);
+  padding: 8px 16px calc(var(--tabbar-h) + var(--safe-bottom) + 24px);
 }
 body.has-timer #view { padding-bottom: calc(var(--tabbar-h) + var(--timer-h) + var(--safe-bottom) + 24px); }
 #view.fade-in { animation: fadeIn .22s var(--ease); }
@@ -147,12 +152,12 @@ body.has-timer #view { padding-bottom: calc(var(--tabbar-h) + var(--timer-h) + v
   border-top: .5px solid var(--border);
 }
 .tab {
-  flex: 1; max-width: 110px;
+  flex: 1; max-width: 120px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
   color: var(--ink-muted); font-size: .64rem; font-weight: 500;
   transition: color .15s;
 }
-.tab svg { width: 25px; height: 25px; fill: currentColor; }
+.tab svg { width: 24px; height: 24px; fill: currentColor; }
 .tab.active { color: var(--accent); }
 .tab:active svg { transform: scale(.9); }
 
@@ -189,7 +194,7 @@ body.has-timer #view { padding-bottom: calc(var(--tabbar-h) + var(--timer-h) + v
 .btn-mini.danger { background: var(--red-soft); color: var(--red); }
 
 .icon-btn {
-  width: 36px; height: 36px; border-radius: 50%;
+  width: 36px; height: 36px; border-radius: 50%; flex: 0 0 auto;
   display: inline-flex; align-items: center; justify-content: center;
   color: var(--ink-muted); font-size: 1rem;
 }
@@ -613,3 +618,17 @@ p.suggestion-note { color: var(--good); font-weight: 500; font-size: .88rem; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* ---------- Cardio (card minimal) ---------- */
+.cardio-card { padding: 16px 16px 14px; }
+.cardio-name { display: flex; align-items: center; gap: 8px; font-weight: 650; font-size: 1.02rem; }
+.cardio-name .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--day, var(--accent)); }
+.cardio-goal { display: flex; align-items: baseline; gap: 6px; margin: 6px 0 2px; }
+.cardio-goal .big { font-family: var(--font-num); font-size: 2.4rem; font-weight: 750; letter-spacing: -.03em; line-height: 1.05; font-variant-numeric: tabular-nums; }
+.cardio-goal .unit { font-size: 1rem; font-weight: 600; color: var(--ink-muted); }
+.cardio-chart { margin: 10px 0 12px; }
+.cardio-chart:empty { margin: 6px 0; }
+
+/* Titoli dentro le card più sobri */
+.card h3 { font-size: .95rem; font-weight: 650; }
+.home-kick, .tile-kick { letter-spacing: .03em; }

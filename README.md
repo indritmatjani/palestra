@@ -10,9 +10,11 @@ si installa sulla schermata Home e funziona anche offline.
 - **Timer di recupero** con suono, vibrazione e schermo sempre acceso.
 - **Riscaldamento** calcolato in automatico (20/50/70% del carico).
 - **Scarico (deload)** periodico con pesi dimezzati.
-- **Grafici**: forza, 1RM stimato (Epley), volume, costanza, volume per muscolo, peso corporeo.
-- **Mappa muscoli** fronte/retro colorata per giorno.
-- **Cardio**: HIIT a intervalli (con voce), corsa, cronometro.
+- **Progressi**: grafici di forza, 1RM stimato (Epley), volume, costanza, volume per muscolo, peso corporeo.
+- **Mappa muscoli** fronte/retro colorata per giorno (nella scheda Progressi).
+- **Cardio** con progressione graduale:
+  - *Salto corda*: tempo fisso (10 min), il lavoro cresce e il riposo cala di 5s a ogni sessione completata fino al continuo; poi il tempo continuo sale di 1 min a ogni completamento.
+  - *Tapis roulant e cyclette*: se nella settimana completi l'obiettivo, dal lunedì successivo sale del 10% (almeno +1 min). Km facoltativi.
 - **Database di 1324 esercizi** con immagini, animazioni e istruzioni in italiano.
 - **Backup**: export/import `.json` e sync tra dispositivi (Supabase, opzionale).
 - **Tema chiaro/scuro** (automatico come l'iPhone, o forzato).

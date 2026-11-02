@@ -30,9 +30,20 @@ let currentView = 'home';
 let selectedDayId = state.uiSelectedDay || 'A';
 let editMode = false;
 let profileTab = 'profilo'; // sotto-sezione del Profilo: 'profilo' | 'allenamento' | 'backup'
+let progressTab = 'grafici'; // sotto-sezione di Progressi: 'grafici' | 'muscoli'
 let chartExRowId = null;
 let chartVolumeDay = state.days[0] ? state.days[0].id : 'A';
 let muscleDaysOn = state.days.map(d => d.id); // tutti i giorni attivi di default
+
+/* Icone SVG semplici (stile iOS), colore = colore del testo */
+const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>';
+const ICON_INFO = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r=".6" fill="currentColor"/></svg>';
+const ICON_MORE = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
+
+// la barra in alto diventa visibile (sfocata, con bordo) solo quando la pagina scorre: come nelle app Apple
+window.addEventListener('scroll', () => {
+  document.body.classList.toggle('scrolled', window.scrollY > 4);
+}, { passive: true });
 
 /* =================== TIMER =================== */
 const timer = { endAt: null, total: 0, label: '', interval: null, fired: false };
@@ -197,10 +208,11 @@ function syncTabs() {
   $$('.tab').forEach(x => x.classList.toggle('active', x.dataset.view === currentView));
 }
 
-const VIEW_TITLES = { home: 'Palestra', workout: 'Allenamento', charts: 'Grafici', muscles: 'Muscoli', cardio: 'Cardio', profile: 'Profilo' };
+const VIEW_TITLES = { home: 'Palestra', workout: 'Allenamento', progress: 'Progressi', cardio: 'Cardio', profile: 'Profilo' };
 
 function render() {
-  $('#topbar-title').textContent = VIEW_TITLES[currentView];
+  const name = (state.profile.name || '').trim();
+  $('#topbar-title').textContent = currentView === 'home' ? (name ? 'Ciao ' + name : 'Palestra') : VIEW_TITLES[currentView];
   const action = $('#topbar-action');
   action.classList.add('hidden');
   if (currentView === 'workout') {
@@ -210,8 +222,11 @@ function render() {
   const v = $('#view');
   if (currentView === 'home') { v.innerHTML = renderHome(); animateRings(); }
   else if (currentView === 'workout') v.innerHTML = renderWorkout();
-  else if (currentView === 'charts') { v.innerHTML = renderCharts(); mountCharts(); }
-  else if (currentView === 'muscles') v.innerHTML = renderMuscles();
+  else if (currentView === 'progress') {
+    const seg = `<div class="seg"><button data-action="prtab" data-prtab="grafici" class="${progressTab === 'grafici' ? 'on' : ''}">Grafici</button><button data-action="prtab" data-prtab="muscoli" class="${progressTab === 'muscoli' ? 'on' : ''}">Muscoli</button></div>`;
+    if (progressTab === 'muscoli') v.innerHTML = seg + renderMuscles();
+    else { v.innerHTML = seg + renderCharts(); mountCharts(); }
+  }
   else if (currentView === 'cardio') { v.innerHTML = renderCardio(); mountCardioCharts(); }
   else { v.innerHTML = renderProfile(); syncRenderStatus(); }
   // dissolvenza morbida solo al cambio di vista (non ad ogni aggiornamento interno)
@@ -316,7 +331,7 @@ function cancelSession() {
 
 function showSummaryModal(changes, prs) {
   const prRows = (prs && prs.length)
-    ? `<div class="pr-box">${prs.map(p => `<div class="pr-row">🏆 <strong>Nuovo record!</strong> ${esc(p.ex)} <span class="muted">${esc(p.row)}</span> — ${fmtWeight(p.kg)} <span class="muted">(prima ${fmtWeight(p.prev)})</span></div>`).join('')}</div>`
+    ? `<div class="pr-box">${prs.map(p => `<div class="pr-row"><strong>Nuovo record</strong> ${esc(p.ex)} <span class="muted">${esc(p.row)}</span> — ${fmtWeight(p.kg)} <span class="muted">(prima ${fmtWeight(p.prev)})</span></div>`).join('')}</div>`
     : '';
   const rows = changes.length
     ? changes.map(c => `<div class="progress-change">
@@ -325,7 +340,7 @@ function showSummaryModal(changes, prs) {
       </div>`).join('')
     : '<p class="muted">Nessuna variazione calcolata.</p>';
   openModal(`
-    <h2>Seduta completata 💪</h2>
+    <h2>Seduta completata</h2>
     ${prRows}
     <p class="muted small" style="margin-bottom:10px">${state.settings.autoProgress
       ? 'Pesi e schemi aggiornati automaticamente per la prossima volta (modificabili sempre con "Modifica").'
@@ -346,12 +361,6 @@ function nextSuggestedDayId() {
   const i = state.days.findIndex(d => d.id === last.dayId);
   if (i < 0) return state.days[0].id;
   return state.days[(i + 1) % state.days.length].id;
-}
-function isoWeekKey(dateISO) {
-  const d = new Date(dateISO + 'T00:00:00');
-  const day = (d.getDay() + 6) % 7; // lun=0
-  d.setDate(d.getDate() - day);
-  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 }
 function sessionsThisWeek() {
   const wk = isoWeekKey(todayISO());
@@ -412,7 +421,7 @@ function celebratePR(anchorEl) {
   const card = anchorEl && anchorEl.closest('.ex-card');
   if (card) { card.classList.add('pr-flash'); setTimeout(() => card.classList.remove('pr-flash'), 1200); }
   confettiBurst(anchorEl);
-  toast('🎉 Nuovo record!');
+  toast('Nuovo record!');
 }
 function confettiBurst(anchorEl) {
   if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
@@ -435,8 +444,6 @@ function confettiBurst(anchorEl) {
 }
 
 function renderHome() {
-  const name = (state.profile.name || '').trim();
-  const hello = name ? 'Ciao ' + esc(name) : 'Ciao';
   const nextId = nextSuggestedDayId();
   const nextDay = getDay(nextId);
   const totale = state.sessions.filter(s => s.completed).length;
@@ -449,10 +456,10 @@ function renderHome() {
 
   const goal = state.settings.weeklyGoal || 3;
 
-  let html = `<div class="home-hello">${hello} 👋</div>`;
+  let html = '';
 
   if (dl.enabled && dl.active) {
-    html += `<div class="deload-banner">🪶 <strong>Settimana di scarico</strong> — pesi dimezzati, recupera bene.</div>`;
+    html += `<div class="deload-banner"><strong>Settimana di scarico</strong> — pesi dimezzati, recupera bene.</div>`;
   }
 
   // ---- Bento grid: azione principale + anello obiettivo + streak/totali ----
@@ -462,17 +469,17 @@ function renderHome() {
     primaryTile = `<div class="tile span2 accent" style="--day:${d ? d.color : 'var(--accent)'}">
       <div class="tile-kick">Seduta in corso</div>
       <div class="tile-title">${esc(d ? d.name : 'Allenamento')}</div>
-      <button class="btn full" style="margin-top:12px" data-action="go-workout">Riprendi ▸</button>
+      <button class="btn full" style="margin-top:12px" data-action="go-workout">Riprendi</button>
     </div>`;
   } else if (nextDay) {
     primaryTile = `<div class="tile span2 accent" style="--day:${nextDay.color}">
       <div class="tile-kick">Prossimo allenamento</div>
       <div class="tile-title">${esc(nextDay.name)}</div>
       <div class="tile-sub">${esc(dayMusclesShort(nextDay)) || 'Nessun muscolo assegnato'}</div>
-      <button class="btn full" style="background:${nextDay.color};margin-top:12px" data-action="start-suggested" data-day="${nextDay.id}">Inizia ${esc(nextDay.name)} ▸</button>
+      <button class="btn full" style="background:${nextDay.color};margin-top:12px" data-action="start-suggested" data-day="${nextDay.id}">Inizia ${esc(nextDay.name)}</button>
     </div>`;
   } else {
-    primaryTile = `<div class="tile span2"><div class="tile-kick">Allenamento</div><div class="tile-title">Nessun giorno</div><button class="btn full" style="margin-top:12px" data-action="go-workout">Crea la scheda ▸</button></div>`;
+    primaryTile = `<div class="tile span2"><div class="tile-kick">Allenamento</div><div class="tile-title">Nessun giorno</div><button class="btn full" style="margin-top:12px" data-action="go-workout">Crea la scheda</button></div>`;
   }
 
   html += `<div class="bento">
@@ -482,16 +489,16 @@ function renderHome() {
       ${progressRing(settimana, goal)}
     </div>
     <div class="tile ring-split">
-      <div class="ring-mini"><span class="n">🔥 ${streak}</span><span class="l">settimane<br>di fila</span></div>
+      <div class="ring-mini"><span class="n">${streak}</span><span class="l">settimane<br>di fila</span></div>
       <div class="ring-mini"><span class="n">${totale}</span><span class="l">sedute<br>totali</span></div>
     </div>
   </div>`;
 
   // Record
   if (recs.length) {
-    html += `<div class="home-card"><div class="home-kick">🏆 I tuoi record (1RM stimato)</div>
+    html += `<div class="home-card"><div class="home-kick">Record · 1RM stimato</div>
       ${recs.map(r => `<div class="hist-item"><span><strong style="color:${r.day.color}">${dayLetter(r.day.id)}</strong> ${esc(r.ex.name)} <span class="muted">${esc(r.row.label)}</span></span><span class="strong">${fmtWeight(r.e1rm)}</span></div>`).join('')}
-      <button class="btn-ghost" data-action="go-charts" style="margin-top:6px">Vedi trend forza ▸</button>
+      <button class="btn-ghost" data-action="go-charts" style="margin-top:6px">Vedi i progressi</button>
     </div>`;
   }
 
@@ -501,10 +508,10 @@ function renderHome() {
       <div class="home-kick">Ultimo cardio</div>
       <div class="home-title">${esc(lc.c.name)}</div>
       <div class="muted small" style="margin-bottom:10px">${esc(cardioLastText(lc.c) || '')}</div>
-      <button class="btn full" style="background:${lc.c.color}" data-action="start-cardio" data-cid="${lc.c.id}">▶ Ripeti</button>
+      <button class="btn full" style="background:${lc.c.color}" data-action="start-cardio" data-cid="${lc.c.id}">Ripeti</button>
     </div>`;
   } else {
-    html += `<div class="home-card"><div class="home-kick">Cardio</div><div class="muted small" style="margin-bottom:10px">Non hai ancora fatto cardio. Prova il salto corda HIIT.</div><button class="btn secondary full" data-action="go-cardio">Vai al cardio ▸</button></div>`;
+    html += `<div class="home-card"><div class="home-kick">Cardio</div><div class="muted small" style="margin-bottom:10px">Salto corda, tapis roulant o cyclette.</div><button class="btn secondary full" data-action="go-cardio">Vai al cardio</button></div>`;
   }
 
   if (totale === 0) {
@@ -551,16 +558,16 @@ function renderWorkout() {
   // banner settimana di scarico (deload)
   const dl = deloadInfo();
   if (dl.enabled && dl.active) {
-    html += `<div class="deload-banner">🪶 <strong>Settimana di scarico</strong> · pesi dimezzati (${Math.round((dl.factor || 0.5) * 100)}%) questa settimana. Recupera, poi si riparte più forti.</div>`;
+    html += `<div class="deload-banner"><strong>Settimana di scarico</strong> · pesi dimezzati (${Math.round((dl.factor || 0.5) * 100)}%) questa settimana. Recupera, poi si riparte più forti.</div>`;
   } else if (dl.enabled && dl.weeksToDeload === 1) {
     html += `<div class="deload-soon">La prossima settimana è di scarico (pesi dimezzati).</div>`;
   }
 
   // riscaldamento iniziale (nome e tempo modificabili)
   html += `<div class="cardio-banner">
-    <div><div class="strong">🔥 Riscaldamento</div><div class="muted">${esc(state.settings.warmupName || 'Riscaldamento')} · ${fmtTime(state.settings.cardioSeconds)}</div></div>
+    <div><div class="strong">Riscaldamento</div><div class="muted">${esc(state.settings.warmupName || 'Riscaldamento')} · ${fmtTime(state.settings.cardioSeconds)}</div></div>
     <div class="row-gap">
-      <button class="icon-btn" data-action="edit-warmup" title="Modifica" aria-label="Modifica riscaldamento">✎</button>
+      <button class="icon-btn" data-action="edit-warmup" title="Modifica" aria-label="Modifica riscaldamento">${ICON_MORE}</button>
       <button class="btn-mini primary" data-action="cardio-timer">Avvia</button>
     </div>
   </div>`;
@@ -575,7 +582,7 @@ function renderWorkout() {
   if (!session) {
     html += `<button class="btn full" style="margin-top:10px;background:${day.color}" data-action="start-session" data-day="${day.id}">Inizia seduta ${esc(day.name)}</button>`;
   } else {
-    html += `<button class="btn full good" style="margin-top:10px" data-action="finish-session">✓ Termina seduta</button>`;
+    html += `<button class="btn full good" style="margin-top:10px" data-action="finish-session">Termina seduta</button>`;
   }
 
   return html;
@@ -608,13 +615,13 @@ function renderExercise(ex, index, day, session) {
         </div>
       </div>
       <div class="ex-tools">
-        <button class="icon-btn" data-action="ex-history" data-ex="${ex.id}" title="Storico" aria-label="Storico">🕐</button>
-        ${ex.dsId ? `<button class="icon-btn" data-action="show-how" data-ex="${ex.id}" title="Come si fa" aria-label="Come si fa">ⓘ</button>` : ''}
+        <button class="icon-btn" data-action="ex-history" data-ex="${ex.id}" title="Storico" aria-label="Storico">${ICON_HISTORY}</button>
+        ${ex.dsId ? `<button class="icon-btn" data-action="show-how" data-ex="${ex.id}" title="Come si fa" aria-label="Come si fa">${ICON_INFO}</button>` : ''}
         ${editMode ? `
           <button class="icon-btn" data-action="move-ex" data-dir="-1" data-day="${day.id}" data-ex="${ex.id}" title="Su" aria-label="Sposta su">↑</button>
           <button class="icon-btn" data-action="move-ex" data-dir="1" data-day="${day.id}" data-ex="${ex.id}" title="Giù" aria-label="Sposta giù">↓</button>
         ` : ''}
-        <button class="icon-btn" data-action="edit-exercise" data-day="${day.id}" data-ex="${ex.id}" title="Modifica" aria-label="Modifica">✎</button>
+        <button class="icon-btn" data-action="edit-exercise" data-day="${day.id}" data-ex="${ex.id}" title="Modifica" aria-label="Modifica">${ICON_MORE}</button>
       </div>
     </div>
     <div class="ex-body">`;
@@ -625,7 +632,7 @@ function renderExercise(ex, index, day, session) {
     const steps = warmupSteps(ex.warmup, s1);
     if (steps.length && s1 > 0) {
       html += `<div class="warmup-box">
-        <div class="warmup-title"><span>🔥 Riscaldamento (${ex.warmup === 'full' ? 'completo' : 'ridotto'})</span></div>
+        <div class="warmup-title"><span>Riscaldamento ${ex.warmup === 'full' ? 'completo' : 'ridotto'}</span></div>
         ${steps.map(st => `<div class="wu-row">
           <span>${st.pct}% → <strong>${fmtWeight(st.kg)}</strong> × ${st.reps}</span>
           <button class="btn-mini" data-action="warmup-timer">Rest ${fmtTime(state.settings.warmupRest)}</button>
@@ -640,7 +647,7 @@ function renderExercise(ex, index, day, session) {
   }
 
   // pulsante recupero
-  html += `<button class="rest-btn" data-action="rest-timer" data-cat="${ex.restCat}">⏱ Recupero ${esc(restShort)} — avvia ${fmtTime(rest.seconds)}</button>`;
+  html += `<button class="rest-btn" data-action="rest-timer" data-cat="${ex.restCat}">Recupero ${esc(restShort)} · avvia ${fmtTime(rest.seconds)}</button>`;
 
   html += `</div></div>`;
   return html;
@@ -683,7 +690,7 @@ function renderRow(ex, r, session) {
         // plank & co.: cronometro conta-avanti che registra i secondi tenuti
         html += `<div class="set-row tempo-row">
           <span class="set-num">${i + 1}</span>
-          <button class="btn-mini tempo-start" data-action="tempo-timer" data-entry="${r.id}" data-i="${i}" data-cat="${ex.restCat}">⏱ Cronometra</button>
+          <button class="btn-mini tempo-start" data-action="tempo-timer" data-entry="${r.id}" data-i="${i}" data-cat="${ex.restCat}">Cronometra</button>
           <input type="text" inputmode="numeric" placeholder="sec" value="${e.reps != null ? e.reps : ''}"
             data-entry="${r.id}" data-i="${i}" data-field="reps" aria-label="secondi">
           <button class="set-done ${e.done ? 'done' : ''}" data-action="toggle-done" data-entry="${r.id}" data-i="${i}" data-cat="${ex.restCat}" aria-label="Serie completata">✓</button>
@@ -902,7 +909,7 @@ function renderProfileDati() {
   const theme = st.theme === 'light' || st.theme === 'dark' ? st.theme : 'auto';
   return `
     <div class="card">
-      <h3>👤 Dati personali</h3>
+      <h3>Dati personali</h3>
       <div class="form-grid-2">
         <div class="form-row"><label>Nome</label><input id="p-name" value="${escAttr2(p.name || '')}" autocomplete="given-name"></div>
         <div class="form-row"><label>Età</label><input id="p-age" type="number" inputmode="numeric" value="${p.age || ''}"></div>
@@ -914,7 +921,7 @@ function renderProfileDati() {
     </div>
 
     <div class="card">
-      <h3>🎨 Aspetto e preferenze</h3>
+      <h3>Aspetto</h3>
       <div class="form-grid-2">
         <div class="form-row"><label>Tema</label>
           <select id="s-theme">
@@ -940,7 +947,7 @@ function renderProfileAllenamento() {
   const recent = state.sessions.filter(s => s.completed).sort((a, b) => (a.date < b.date ? 1 : -1)).slice(0, 8);
   return `
     <div class="card">
-      <h3>⏱ Timer (secondi)</h3>
+      <h3>Recuperi (secondi)</h3>
       <div class="form-grid-3">
         <div class="form-row"><label>Russo</label><input id="s-rest-russo" type="number" inputmode="numeric" value="${st.rest.russo.seconds}"></div>
         <div class="form-row"><label>Top set</label><input id="s-rest-normale" type="number" inputmode="numeric" value="${st.rest.normale.seconds}"></div>
@@ -954,12 +961,12 @@ function renderProfileAllenamento() {
       <div class="form-row">
         <label class="check"><input id="s-autoprogress" type="checkbox" ${st.autoProgress ? 'checked' : ''}> Aggiorna automaticamente i pesi a fine seduta (progressione)</label>
       </div>
-      <div class="form-row"><label>🎯 Obiettivo sedute a settimana (anello Home)</label><input id="s-weekly-goal" type="number" inputmode="numeric" min="1" max="14" value="${st.weeklyGoal || 3}"></div>
+      <div class="form-row"><label>Obiettivo sedute a settimana</label><input id="s-weekly-goal" type="number" inputmode="numeric" min="1" max="14" value="${st.weeklyGoal || 3}"></div>
       <button class="btn secondary full" data-action="save-settings">Salva timer</button>
     </div>
 
     <div class="card">
-      <h3>🪶 Scarico (deload)</h3>
+      <h3>Scarico (deload)</h3>
       <p class="muted" style="margin-bottom:8px">${(() => { const d = deloadInfo(); if (!d.enabled) return 'Disattivato.'; if (d.active) return 'Questa settimana è di SCARICO: pesi dimezzati.'; return 'Sei alla settimana ' + d.weekInCycle + ' di ' + d.cycleLen + '. Scarico tra ' + d.weeksToDeload + ' settimana/e.'; })()}</p>
       <div class="form-row">
         <label class="check"><input id="s-deload-on" type="checkbox" ${st.deload.enabled ? 'checked' : ''}> Attiva scarico automatico</label>
@@ -977,11 +984,11 @@ function renderProfileAllenamento() {
     ${(() => {
       const recs = allRecords().slice(0, 8);
       if (!recs.length) return '';
-      return `<div class="card"><h3>🏆 Record (1RM stimato)</h3>${recs.map(r => `<div class="hist-item"><span><strong style="color:${r.day.color}">${dayLetter(r.day.id)}</strong> ${esc(r.ex.name)} <span class="muted">${esc(r.row.label)}</span></span><span class="strong">${fmtWeight(r.e1rm)}</span></div>`).join('')}<p class="muted small" style="margin-top:8px">Stima del massimale dai tuoi set (formula di Epley). Vedi il trend nella scheda Grafici.</p></div>`;
+      return `<div class="card"><h3>Record · 1RM stimato</h3>${recs.map(r => `<div class="hist-item"><span><strong style="color:${r.day.color}">${dayLetter(r.day.id)}</strong> ${esc(r.ex.name)} <span class="muted">${esc(r.row.label)}</span></span><span class="strong">${fmtWeight(r.e1rm)}</span></div>`).join('')}<p class="muted small" style="margin-top:8px">Stima del massimale dai tuoi set (formula di Epley). Vedi il trend nella scheda Grafici.</p></div>`;
     })()}
 
     <div class="card">
-      <h3>📅 Storico sedute (${completedCount})</h3>
+      <h3>Storico sedute (${completedCount})</h3>
       ${recent.length ? recent.map(s => {
         const day = getDay(s.dayId);
         const nSets = Object.values(s.entries).flat().filter(e => e.done).length;
@@ -1001,7 +1008,7 @@ function renderProfileAllenamento() {
 function renderProfileBackup() {
   return `
     <div class="card">
-      <h3>☁️ Sync tra dispositivi</h3>
+      <h3>Sync tra dispositivi</h3>
       <div class="sync-status" id="sync-status"></div>
       ${syncEnabled() ? `
         <p class="muted" style="margin-bottom:8px">Codice di sincronizzazione (segreto: chi lo conosce accede ai tuoi dati):</p>
@@ -1014,7 +1021,7 @@ function renderProfileBackup() {
           <button class="btn danger" style="flex:1" data-action="sync-off">Disattiva</button>
         </div>
       ` : `
-        <p class="muted" style="margin-bottom:6px">⚠️ Ora i tuoi dati sono <strong>solo su questo telefono</strong>: se cancelli i dati del browser (o l'app dalla Home) li perdi.</p>
+        <p class="muted" style="margin-bottom:6px">Ora i tuoi dati sono <strong>solo su questo telefono</strong>: se cancelli i dati del browser (o l'app dalla Home) li perdi.</p>
         <p class="muted" style="margin-bottom:10px">Attiva il sync per avere un <strong>backup automatico nel cloud</strong> e i dati uguali su più dispositivi: genera un codice qui e, sull'altro dispositivo, scegli "Ho già un codice".</p>
         <div class="row-gap">
           <button class="btn" style="flex:1" data-action="sync-new">Attiva (nuovo codice)</button>
@@ -1024,7 +1031,7 @@ function renderProfileBackup() {
     </div>
 
     <div class="card">
-      <h3>💾 Backup manuale</h3>
+      <h3>Backup manuale</h3>
       <p class="muted" style="margin-bottom:10px">Esporta un file .json con TUTTO (scheda + storico). Per ripristinarlo su un altro telefono: "Importa" e scegli il file. ${syncEnabled() ? 'Col sync attivo di solito non serve.' : 'Consigliato se non usi il sync.'}</p>
       <div class="row-gap">
         <button class="btn secondary" style="flex:1" data-action="export">Esporta</button>
@@ -1590,7 +1597,7 @@ function handleAction(a, btn) {
     else if (a === 'add-day') { const d = addDay(); selectedDayId = d.id; render(); }
     else if (a === 'start-suggested') { selectedDayId = btn.dataset.day; startSession(btn.dataset.day); currentView = 'workout'; syncTabs(); render(); window.scrollTo(0, 0); }
     else if (a === 'go-workout') { currentView = 'workout'; syncTabs(); render(); window.scrollTo(0, 0); }
-    else if (a === 'go-charts') { currentView = 'charts'; syncTabs(); render(); window.scrollTo(0, 0); }
+    else if (a === 'go-charts') { currentView = 'progress'; progressTab = 'grafici'; syncTabs(); render(); window.scrollTo(0, 0); }
     else if (a === 'go-cardio') { currentView = 'cardio'; syncTabs(); render(); window.scrollTo(0, 0); }
     else if (a === 'start-cardio') startCardioRunner(btn.dataset.cid);
     else if (a === 'edit-cardio') editCardioModal(btn.dataset.cid);
@@ -1675,6 +1682,7 @@ function handleAction(a, btn) {
         saveState(); render();
       }
     }
+    else if (a === 'prtab') { progressTab = btn.dataset.prtab || 'grafici'; render(); }
     else if (a === 'ptab') {
       profileTab = btn.dataset.ptab || 'profilo';
       render();
@@ -1799,14 +1807,14 @@ syncInit(); // sync cloud in background (se attivato)
 /* Onboarding al primo avvio: nome, unità, e invito ad attivare il backup cloud o importare. */
 function onboardingModal() {
   const modal = openModal(`
-    <h2>Benvenuto in Palestra 💪</h2>
+    <h2>Benvenuto in Palestra</h2>
     <p class="muted small" style="margin-bottom:12px">Due cose veloci e sei pronto.</p>
     <div class="form-grid-2">
       <div class="form-row"><label>Come ti chiami?</label><input id="ob-name" placeholder="Il tuo nome"></div>
       <div class="form-row"><label>Unità</label><select id="ob-unit"><option value="kg">kg</option><option value="lb">lb</option></select></div>
     </div>
     <div class="card inset">
-      <div class="strong small">☁️ Backup nel cloud (consigliato)</div>
+      <div class="strong small">Backup nel cloud (consigliato)</div>
       <p class="muted small" style="margin:6px 0 10px">Senza, i dati stanno solo su questo telefono e si perdono se cancelli l'app. Attivalo: ottieni un codice per ritrovarli ovunque.</p>
       <button class="btn full" id="ob-sync">Attiva backup cloud</button>
     </div>
