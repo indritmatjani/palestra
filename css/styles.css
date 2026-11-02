@@ -730,3 +730,21 @@ img, button, .tab { -webkit-touch-callout: none; }
 /* i riquadri dei giorni si dividono lo spazio (con molti giorni si scorre in orizzontale) */
 .day-pill { min-width: 84px; overflow: hidden; flex-basis: 0; }
 .day-select.compact .day-pill { flex: 0 0 52px; min-width: 52px; }
+
+/* ---------- Home: sezione cardio ---------- */
+.home-cardio { padding-bottom: 6px; }
+.home-cardio .row-between { margin-bottom: 2px; }
+.hc-row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: .5px solid var(--border); }
+.hc-row .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--day); flex: 0 0 auto; }
+.hc-main { flex: 1; min-width: 0; }
+.hc-name { font-weight: 650; }
+.hc-main .muted { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hc-go {
+  flex: 0 0 auto; width: 44px; height: 44px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--day); color: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, .08) inset;
+  transition: transform .12s var(--ease), filter .12s;
+}
+.hc-go svg { margin-left: 2px; } /* il triangolo "play" appare centrato */
+.hc-go:active { transform: scale(.92); filter: brightness(.9); }

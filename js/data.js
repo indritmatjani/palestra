@@ -532,9 +532,11 @@ function loadState() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      const wasWrapper = parsed && Array.isArray(parsed.programs);
       state = migrateState(parsed);
-      if (wasWrapper) { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {} }
+      // salva subito i dati aggiornati (campi nuovi, formato vecchio convertito),
+      // senza cambiare updatedAt: così il sync non li considera "modificati"
+      const fixed = JSON.stringify(state);
+      if (fixed !== raw) { try { localStorage.setItem(STORAGE_KEY, fixed); } catch (e) {} }
       return;
     }
   } catch (e) { console.error('loadState', e); }
@@ -897,12 +899,14 @@ function applyProgression(session) {
         changes.push({ ex: ex.name, row: r.label, kind: 'up', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
         if (state.settings.autoProgress) r.weight = newW;
       } else if (bestReps < r.repMin) {
-        const newW = Math.max(0, roundHalf(lastKg - inc));
+        let newW = Math.max(0, roundHalf(lastKg - inc));
+        if (r.maxWeight && newW > r.maxWeight) newW = r.maxWeight; // mai sopra il tetto della macchina
         changes.push({ ex: ex.name, row: r.label, kind: 'down', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
         if (state.settings.autoProgress) r.weight = newW;
       } else {
-        changes.push({ ex: ex.name, row: r.label, kind: 'same', text: 'Mantieni ' + fmtKg(lastKg) + ' kg' });
-        if (state.settings.autoProgress) r.weight = lastKg;
+        const keep = r.maxWeight ? Math.min(lastKg, r.maxWeight) : lastKg;
+        changes.push({ ex: ex.name, row: r.label, kind: 'same', text: 'Mantieni ' + fmtKg(keep) + ' kg' });
+        if (state.settings.autoProgress) r.weight = keep;
       }
     }
   }

@@ -41,6 +41,7 @@ let muscleDaysOn = state.days.map(d => d.id); // tutti i giorni attivi di defaul
 /* Icone SVG semplici (stile iOS), colore = colore del testo */
 const ICON_HISTORY = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7"/><path d="M3 4v5h5"/><path d="M12 7v5l3 2"/></svg>';
 const ICON_INFO = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 11v6"/><circle cx="12" cy="7.5" r=".6" fill="currentColor"/></svg>';
+const ICON_PLAY = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M8 5.5v13a1 1 0 0 0 1.5.86l10.5-6.5a1 1 0 0 0 0-1.72L9.5 4.64A1 1 0 0 0 8 5.5z"/></svg>';
 const ICON_MORE = '<svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"/><circle cx="12" cy="12" r="1.8"/><circle cx="19" cy="12" r="1.8"/></svg>';
 
 // la barra in alto diventa visibile (sfocata, con bordo) solo quando la pagina scorre: come nelle app Apple
@@ -468,8 +469,6 @@ function renderHome() {
   const settimana = sessionsThisWeek();
   const streak = weekStreak();
   const dl = deloadInfo();
-  const recs = allRecords().slice(0, 3);
-  const lc = lastCardioAny();
   const activeSess = activeSession();
 
   const goal = state.settings.weeklyGoal || 3;
@@ -500,8 +499,36 @@ function renderHome() {
     primaryTile = `<div class="tile span2"><div class="tile-kick">Allenamento</div><div class="tile-title">Nessun giorno</div><button class="btn full" style="margin-top:12px" data-action="go-workout">Crea la scheda</button></div>`;
   }
 
+  // 1) prossimo allenamento
+  html += `<div class="bento">${primaryTile}</div>`;
+
+  // 2) cardio: ogni attività con l'obiettivo di oggi e avvio diretto
+  const cardioList = state.cardio || [];
+  if (cardioList.length) {
+    let changed = false;
+    for (const c of cardioList) if (applyCardioWeek(c)) changed = true;
+    if (changed) saveState();
+    html += `<div class="home-card home-cardio">
+      <div class="row-between"><div class="home-kick">Cardio</div><button class="btn-ghost" data-action="go-cardio">Dettagli</button></div>
+      ${cardioList.map(c => {
+        const g = cardioGoalText(c);
+        const last = cardioLast(c);
+        return `<div class="hc-row" style="--day:${c.color}">
+          <span class="dot"></span>
+          <div class="hc-main">
+            <div class="hc-name">${esc(c.name)}</div>
+            <div class="muted">${esc(g.big + (g.unit ? ' ' + g.unit : ''))}${last ? ' · ultima ' + fmtDate(last.date) : ''}</div>
+          </div>
+          <button class="hc-go" style="--day:${c.color}" data-action="start-cardio" data-cid="${c.id}" aria-label="Avvia ${escAttr2(c.name)}">${ICON_PLAY}</button>
+        </div>`;
+      }).join('')}
+    </div>`;
+  } else {
+    html += `<div class="home-card"><div class="home-kick">Cardio</div><div class="muted small" style="margin-bottom:10px">Salto corda, tapis roulant o cyclette.</div><button class="btn secondary full" data-action="go-cardio">Vai al cardio</button></div>`;
+  }
+
+  // 3) anelli della settimana e sedute
   html += `<div class="bento">
-    ${primaryTile}
     <div class="tile tile-ring" data-action="go-workout">
       <div class="tile-kick">Pesi · settimana</div>
       ${progressRing(settimana, goal)}
@@ -516,26 +543,6 @@ function renderHome() {
       <div class="ring-mini"><span class="n">${cardioWeekStats().minutes}</span><span class="l">min cardio<br>settimana</span></div>
     </div>
   </div>`;
-
-  // Record
-  if (recs.length) {
-    html += `<div class="home-card"><div class="home-kick">Record · 1RM stimato</div>
-      ${recs.map(r => `<div class="hist-item"><span><strong style="color:${r.day.color}">${dayLetter(r.day.id)}</strong> ${esc(r.ex.name)} <span class="muted">${esc(r.row.label)}</span></span><span class="strong">${fmtWeight(r.e1rm)}</span></div>`).join('')}
-      <button class="btn-ghost" data-action="go-charts" style="margin-top:6px">Vedi i progressi</button>
-    </div>`;
-  }
-
-  // Ultimo cardio + quick start
-  if (lc) {
-    html += `<div class="home-card card-accent" style="--day:${lc.c.color}">
-      <div class="home-kick">Ultimo cardio</div>
-      <div class="home-title">${esc(lc.c.name)}</div>
-      <div class="muted small" style="margin-bottom:10px">${esc(cardioLastText(lc.c) || '')}</div>
-      <button class="btn full" style="background:${lc.c.color}" data-action="start-cardio" data-cid="${lc.c.id}">Ripeti</button>
-    </div>`;
-  } else {
-    html += `<div class="home-card"><div class="home-kick">Cardio</div><div class="muted small" style="margin-bottom:10px">Salto corda, tapis roulant o cyclette.</div><button class="btn secondary full" data-action="go-cardio">Vai al cardio</button></div>`;
-  }
 
   if (totale === 0) {
     html += `<p class="muted small" style="text-align:center;margin-top:8px">Suggerimento: tocca "Inizia" qui sopra, segna le serie fatte con ✓ e l'app aggiorna i pesi da sola.</p>`;
