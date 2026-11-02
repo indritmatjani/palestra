@@ -52,16 +52,16 @@ function uid() {
 
 /* type:
    'russo'  → schema russo a top set (progressione di schema, poi peso)
-   'range'  → rep range: sopra il range aumenta il peso (fino a maxWeight, se impostato)
+   'range'  → rep range: raggiunto il massimo del range aumenta il peso
    'reps'   → a cedimento: peso fisso, si progredisce battendo le RIPETIZIONI
    'tempo'  → a cedimento: si progredisce battendo i SECONDI (plank ecc.)
-   maxWeight: tetto di carico (0 = nessuno). Al tetto si progredisce a ripetizioni. */
+   (il vecchio campo maxWeight, tetto della macchina, non è più usato) */
 function row(label, type, opts) {
   return Object.assign({
     id: uid(), label, type,
     repMin: 8, repMax: 10,
     schemeIndex: 0, russoIncrement: 5,
-    weight: 0, sets: 1, maxWeight: 0,
+    weight: 0, sets: 1,
   }, opts);
 }
 
@@ -144,9 +144,8 @@ function defaultState() {
           exercise('Adductor interno', {
             dsId: '0598', dsMedia: '0598-oHsrypV', dsName: 'lever seated hip adduction',
             restCat: 'isolamento',
-            note: 'Max macchina 93 kg: poi si cresce a rep, a cedimento',
             muscles: ['adduttori'],
-            rows: [row('S1', 'range', { repMin: 4, repMax: 8, weight: 91, maxWeight: 93 })],
+            rows: [row('S1', 'range', { repMin: 4, repMax: 8, weight: 91 })],
           }),
           exercise('Crunch cavi', {
             dsId: '0175', dsMedia: '0175-WW95auq', dsName: 'cable kneeling crunch',
@@ -247,9 +246,8 @@ function defaultState() {
           exercise('Abductor esterno', {
             dsId: '0597', dsMedia: '0597-CHpahtl', dsName: 'lever seated hip abduction',
             restCat: 'isolamento',
-            note: 'Max macchina 93 kg: poi si cresce a rep, a cedimento',
             muscles: ['abduttori', 'glutei'],
-            rows: [row('S1', 'range', { repMin: 4, repMax: 8, weight: 91, maxWeight: 93 })],
+            rows: [row('S1', 'range', { repMin: 4, repMax: 8, weight: 91 })],
           }),
           exercise('Plank + Reverse Plank', {
             dsId: '0464', dsMedia: '0464-CosupLu', dsName: 'front plank with twist',
@@ -490,7 +488,7 @@ function migrateState(s) {
     if (!Array.isArray(d.exercises)) d.exercises = [];
     d.exercises.forEach(ex => {
       if (!(Number(ex.incKg) > 0)) ex.incKg = defaultIncFor(ex, s.settings && s.settings.smallIncrement);
-      (ex.rows || []).forEach(r => { if (r.failCount == null) r.failCount = 0; });
+      (ex.rows || []).forEach(r => { if (r.failCount == null) r.failCount = 0; delete r.maxWeight; }); // tetto macchina: rimosso
     });
   });
   if (!Array.isArray(s.cardio)) s.cardio = def.cardio;
@@ -882,31 +880,18 @@ function applyProgression(session) {
       const atTop = kgs.length ? entries.filter(e => e.kg === lastKg) : entries;
       const bestReps = Math.max(...atTop.map(e => e.reps || 0));
       const inc = exIncrement(ex);
-      // tetto di carico raggiunto (es. macchina a 93 kg): si cresce a ripetizioni
-      if (r.maxWeight && lastKg >= r.maxWeight && bestReps >= r.repMax) {
-        const prevBest = bestRepsFor(r.id, session.date);
-        if (state.settings.autoProgress) r.weight = Math.min(lastKg, r.maxWeight);
-        changes.push({
-          ex: ex.name, row: r.label, kind: bestReps > prevBest ? 'up' : 'same',
-          text: 'Max carico ' + fmtKg(r.maxWeight) + ' kg → cresci a rep: ' + bestReps + (prevBest ? ' (prima ' + prevBest + ')' : ''),
-        });
-        continue;
-      }
       if (bestReps >= r.repMax) {
         // doppia progressione: raggiunto il massimo del range (es. 8 su 4–8) → più peso
-        let newW = roundHalf(lastKg + inc);
-        if (r.maxWeight && newW > r.maxWeight) newW = r.maxWeight; // non superare il tetto
+        const newW = roundHalf(lastKg + inc);
         changes.push({ ex: ex.name, row: r.label, kind: 'up', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
         if (state.settings.autoProgress) r.weight = newW;
       } else if (bestReps < r.repMin) {
-        let newW = Math.max(0, roundHalf(lastKg - inc));
-        if (r.maxWeight && newW > r.maxWeight) newW = r.maxWeight; // mai sopra il tetto della macchina
+        const newW = Math.max(0, roundHalf(lastKg - inc));
         changes.push({ ex: ex.name, row: r.label, kind: 'down', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
         if (state.settings.autoProgress) r.weight = newW;
       } else {
-        const keep = r.maxWeight ? Math.min(lastKg, r.maxWeight) : lastKg;
-        changes.push({ ex: ex.name, row: r.label, kind: 'same', text: 'Mantieni ' + fmtKg(keep) + ' kg' });
-        if (state.settings.autoProgress) r.weight = keep;
+        changes.push({ ex: ex.name, row: r.label, kind: 'same', text: 'Mantieni ' + fmtKg(lastKg) + ' kg' });
+        if (state.settings.autoProgress) r.weight = lastKg;
       }
     }
   }

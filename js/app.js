@@ -721,8 +721,6 @@ function renderRow(ex, r, session) {
     kgLabel = r.type === 'tempo' ? 'secondi' : 'corpo libero';
   } else if (dl.active && r.weight) {
     kgLabel = `<span class="warn">${fmtWeight(showKg)} (scarico)</span>`;
-  } else if (r.maxWeight && r.weight >= r.maxWeight) {
-    kgLabel = `${fmtWeight(r.weight)} <span class="warn">(max: cresci a rep)</span>`;
   } else {
     kgLabel = fmtWeight(r.weight);
   }
@@ -1257,10 +1255,10 @@ function editExerciseModal(dayId, exId) {
         </div>
         <div class="form-row"><label>Peso (kg)</label><input data-rf="weight" type="text" inputmode="decimal" value="${String(r.weight).replace('.', ',')}"></div>
       </div>
-      <div class="form-grid-3 rf-range" style="${(r.type === 'range') ? '' : 'display:none'}">
+      <div class="form-grid-2 rf-range" style="${(r.type === 'range') ? '' : 'display:none'}">
         <div class="form-row"><label>Rep min</label><input data-rf="repMin" type="number" inputmode="numeric" value="${r.repMin}"></div>
         <div class="form-row"><label>Rep max</label><input data-rf="repMax" type="number" inputmode="numeric" value="${r.repMax}"></div>
-        <div class="form-row"><label>Max kg (0=nessuno)</label><input data-rf="maxWeight" type="text" inputmode="decimal" value="${String(r.maxWeight || 0).replace('.', ',')}"></div>
+
       </div>
       <div class="form-grid-2 rf-sets" style="${r.type === 'russo' ? 'display:none' : ''}">
         <div class="form-row"><label>N. serie</label><input data-rf="sets" type="number" inputmode="numeric" value="${r.sets || 1}"></div>
@@ -1349,7 +1347,7 @@ function editExerciseModal(dayId, exId) {
           const f = inp.dataset.rf;
           if (f === 'label') tmpRows[i].label = inp.value;
           else if (f === 'type') { tmpRows[i].type = inp.value; rerenderRows(); }
-          else if (f === 'weight' || f === 'russoIncrement' || f === 'maxWeight') tmpRows[i][f] = Math.max(0, Math.min(1000, parseNum(inp.value) || 0));
+          else if (f === 'weight' || f === 'russoIncrement') tmpRows[i][f] = Math.max(0, Math.min(1000, parseNum(inp.value) || 0));
           else if (f === 'schemeIndex') tmpRows[i][f] = Math.max(0, Math.min(RUSSO_SCHEME.length - 1, parseInt(inp.value) || 0));
           else if (f === 'sets') tmpRows[i][f] = Math.max(1, Math.min(20, parseInt(inp.value) || 1));
           else tmpRows[i][f] = Math.max(1, Math.min(100, parseInt(inp.value) || 1)); // repMin / repMax
