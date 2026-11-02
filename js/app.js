@@ -577,7 +577,7 @@ function renderWorkout() {
     const muscles = [...new Set(day.exercises.flatMap(e => e.muscles || []))];
     html += `<div class="card day-hero" style="--day:${day.color}">
       <div class="day-hero-name">${esc(day.name)}</div>
-      ${muscles.length ? `<div class="chip-wrap center">${muscles.slice(0, 6).map(m => `<span class="chip static">${esc((MUSCLES[m] || m).split(' ')[0])}</span>`).join('')}${muscles.length > 6 ? `<span class="chip static muted-chip">+${muscles.length - 6}</span>` : ''}</div>` : ''}
+      ${muscles.length ? `<details class="day-muscles"><summary>Muscoli allenati (${muscles.length})</summary><div class="chip-wrap center">${muscles.map(m => `<span class="chip static">${esc((MUSCLES[m] || m).split(' ')[0])}</span>`).join('')}</div></details>` : ''}
       <div class="day-stats">
         <div><span class="n">${day.exercises.length}</span><span class="l">esercizi</span></div>
         <div><span class="n">${nSets}</span><span class="l">serie</span></div>
@@ -645,7 +645,7 @@ function dayMusclesShort(day) {
 function renderExercise(ex, index, day, session) {
   const rest = state.settings.rest[ex.restCat] || state.settings.rest.normale;
   const thumb = ex.dsMedia
-    ? `<button class="ex-thumb" data-action="show-how" data-ex="${ex.id}" title="Come si fa" aria-label="Come si fa"><img src="${exImg(ex.dsMedia)}" alt="" loading="lazy" decoding="async"></button>`
+    ? `<button class="ex-thumb" data-action="show-how" data-ex="${ex.id}" title="Come si fa" aria-label="Come si fa" data-initial="${escAttr2((ex.name || '?').trim().charAt(0).toUpperCase())}"><img src="${exImg(ex.dsMedia)}" alt="" loading="lazy" decoding="async"></button>`
     : '';
   // esercizio completato → card attenuata con spunta
   let exDone = false;
@@ -661,7 +661,7 @@ function renderExercise(ex, index, day, session) {
         ${thumb}
         <div style="min-width:0">
           <div class="ex-name">${esc(ex.name)}</div>
-          <div class="ex-meta">${esc(rest.label)}${ex.note ? ' · ' + esc(ex.note) : ''}</div>
+          ${session ? `<div class="ex-meta">${esc(rest.label)}${ex.note ? ' · ' + esc(ex.note) : ''}</div>` : (ex.note ? `<div class="ex-meta">${esc(ex.note)}</div>` : '')}
         </div>
       </div>
       <div class="ex-tools">
@@ -694,8 +694,8 @@ function renderExercise(ex, index, day, session) {
     html += renderRow(ex, r, session);
   }
 
-  // pulsante recupero
-  html += `<button class="rest-btn" data-action="rest-timer" data-cat="${ex.restCat}">Recupero ${esc(restShort)} · avvia ${fmtTime(rest.seconds)}</button>`;
+  // pulsante recupero (solo durante la seduta)
+  if (session) html += `<button class="rest-btn" data-action="rest-timer" data-cat="${ex.restCat}">Recupero ${esc(restShort)} · avvia ${fmtTime(rest.seconds)}</button>`;
 
   html += `</div></div>`;
   return html;
@@ -726,9 +726,33 @@ function renderRow(ex, r, session) {
   } else {
     kgLabel = fmtWeight(r.weight);
   }
+  const lastNote = lastPerformance(r.id);
+  if (!session) {
+    // anteprima della giornata: cosa fare, in tre colonne ben allineate
+    const rest = state.settings.rest[ex.restCat] || state.settings.rest.normale;
+    let repTxt;
+    if (r.type === 'russo') repTxt = russoLabel(r.schemeIndex || 0).replace('x', '×');
+    else if (r.type === 'reps') repTxt = prevBest ? '> ' + prevBest : 'max';
+    else if (r.type === 'tempo') repTxt = prevBest ? '> ' + prevBest + 's' : 'max sec';
+    else repTxt = r.repMin + '–' + r.repMax;
+    const setsTxt = r.type === 'russo' ? '' : ((r.sets || 1) > 1 ? ' · ' + r.sets + ' serie' : '');
+    let pesoTxt;
+    if (r.type === 'tempo' || !r.weight) pesoTxt = r.type === 'tempo' ? '—' : 'corpo';
+    else pesoTxt = fmtKg(toDisplayWeight(dl.active ? showKg : r.weight)) + ' ' + unitLabel();
+    const title = /^S\d+$/.test(r.label) ? 'Serie ' + r.label.slice(1) : r.label;
+    const note = r.type === 'russo' ? 'schema russo' : (r.type === 'reps' || r.type === 'tempo') ? 'a cedimento' : '';
+    return `<div class="set-plan">
+      <div class="set-plan-title">${esc(title)}${setsTxt}${note ? ` <span class="muted">· ${note}</span>` : ''}${dl.active && r.weight ? ' <span class="warn">· scarico</span>' : ''}</div>
+      <div class="set-plan-grid">
+        <div><span class="l">Rep</span><span class="v">${esc(repTxt)}</span></div>
+        <div><span class="l">Peso</span><span class="v">${esc(pesoTxt)}</span></div>
+        <div><span class="l">Recupero</span><span class="v">${fmtTime(rest.seconds)}</span></div>
+      </div>
+      ${lastNote ? `<div class="set-plan-last">${lastNote}</div>` : ''}
+    </div>`;
+  }
   let html = `<div class="set-block"><div class="set-head"><span class="set-label">${esc(r.label)}</span><span class="set-target">${target} · ${kgLabel}</span></div>`;
 
-  const lastNote = lastPerformance(r.id);
   if (lastNote) html += `<div class="suggestion-note">${lastNote}</div>`;
 
   if (session) {
@@ -776,7 +800,11 @@ function lastPerformance(rowId) {
   if (!sessions.length) return null;
   const entries = sessions[0].entries[rowId].filter(e => e.done);
   const parts = entries.map(e => (e.reps || 0)).join('/');
-  return 'Ultima (' + fmtDate(sessions[0].date) + '): ' + fmtWeight(entries[0].kg) + ' × ' + parts;
+  const f = findRow(rowId);
+  const when = 'Ultima (' + fmtDate(sessions[0].date) + '): ';
+  if (f && f.row.type === 'tempo') return when + parts + ' sec';
+  if (!entries[0].kg) return when + parts + ' rep'; // corpo libero: niente "0 kg"
+  return when + fmtWeight(entries[0].kg) + ' × ' + parts;
 }
 
 /* =================== VISTA: GRAFICI =================== */
@@ -1905,6 +1933,12 @@ function handleAction(a, btn) {
       state = null; loadState(); applyTheme(); render();
     }
 }
+
+/* Immagini esercizi non caricate (es. offline): niente icona "rotta" */
+document.addEventListener('error', e => {
+  const img = e.target;
+  if (img && img.tagName === 'IMG' && !img.dataset.failed) { img.dataset.failed = '1'; img.style.visibility = 'hidden'; img.closest('.ex-thumb, .how-media, .exp-row, .link-box')?.classList.add('img-missing'); }
+}, true);
 
 /* =================== AVVIO =================== */
 render();

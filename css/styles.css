@@ -831,3 +831,29 @@ img, button, .tab { -webkit-touch-callout: none; }
 .chip.muted-chip { color: var(--ink-muted); }
 @media (max-width: 360px) { details.warmup-box summary .muted { display: none; } }
 details.warmup-box summary span:first-child { white-space: nowrap; }
+
+/* immagine esercizio non disponibile: riquadro con l'iniziale */
+.ex-thumb { position: relative; }
+.ex-thumb.img-missing { background: var(--surface-2); }
+.ex-thumb.img-missing::after { content: attr(data-initial); position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 1.4rem; font-weight: 750; color: var(--ink-muted); }
+.how-media.img-missing img, .exp-row.img-missing img, .link-box.img-missing img { background: var(--surface-2); }
+
+/* ---------- Anteprima giornata: serie in tre colonne larghe ---------- */
+.set-plan { padding: 12px 0 6px; border-top: .5px solid var(--border); text-align: center; }
+.ex-body > .set-plan:first-child, .ex-body > details + .set-plan { border-top: 0; }
+.set-plan-title { font-size: .95rem; font-weight: 700; margin-bottom: 8px; }
+.set-plan-title .muted { font-weight: 500; font-size: .8rem; }
+.set-plan-grid { display: grid; grid-template-columns: repeat(3, 1fr); }
+.set-plan-grid > div { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 2px 4px; min-width: 0; }
+.set-plan-grid > div + div { border-left: .5px solid var(--border); }
+.set-plan-grid .l { font-size: .66rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-muted); }
+.set-plan-grid .v { font-family: var(--font-num); font-size: 1.35rem; font-weight: 750; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.set-plan-last { font-size: .76rem; color: var(--ink-muted); margin-top: 8px; }
+
+/* muscoli del giorno: chiusi, si aprono con la freccia */
+.day-muscles { margin: -4px 0 12px; }
+.day-muscles summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; font-size: .85rem; color: var(--ink-muted); min-height: 36px; }
+.day-muscles summary::-webkit-details-marker { display: none; }
+.day-muscles summary::after { content: '›'; font-size: 1.2rem; transform: rotate(90deg); transition: transform .2s; }
+.day-muscles[open] summary::after { transform: rotate(-90deg); }
+.day-muscles .chip-wrap { margin: 4px 0 0; }
