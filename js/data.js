@@ -883,7 +883,14 @@ function applyProgression(session) {
       if (bestReps >= r.repMax) {
         // doppia progressione: raggiunto il massimo del range (es. 8 su 4–8) → più peso
         const newW = roundHalf(lastKg + inc);
-        changes.push({ ex: ex.name, row: r.label, kind: 'up', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' });
+        const ch = { ex: ex.name, row: r.label, kind: 'up', text: fmtKg(lastKg) + ' → ' + fmtKg(newW) + ' kg' };
+        // molte più rep del previsto (3+ oltre il massimo): PROPONE un passo doppio.
+        // Resta graduale apposta (i tendini si adattano più lentamente dei muscoli): decide l'utente.
+        if (bestReps >= r.repMax + 3) {
+          const boostW = roundHalf(lastKg + 2 * inc);
+          if (boostW > newW) ch.boost = { rowId: r.id, kg: boostW, reps: bestReps, repMax: r.repMax };
+        }
+        changes.push(ch);
         if (state.settings.autoProgress) r.weight = newW;
       } else if (bestReps < r.repMin) {
         const newW = Math.max(0, roundHalf(lastKg - inc));
@@ -896,6 +903,54 @@ function applyProgression(session) {
     }
   }
   return changes;
+}
+
+/* ---------- controllo dati ----------
+   Cerca nello storico le cose che probabilmente sono errori di inserimento.
+   Non corregge nulla da solo: restituisce un elenco, decide l'utente. */
+function dataIssues() {
+  const rowsById = {};
+  for (const d of state.days) for (const ex of d.exercises) for (const r of ex.rows) rowsById[r.id] = { day: d, ex, row: r };
+  const done = state.sessions.filter(s => s.completed).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+  const med = arr => { const a = arr.slice().sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
+
+  // 1) pesi molto diversi dalle sedute vicine (2 prima e 2 dopo) + rep mancanti
+  const weights = [], noReps = [];
+  for (const rid in rowsById) {
+    const f = rowsById[rid];
+    if (f.row.type === 'tempo') continue;
+    const hist = [];
+    for (const s of done) {
+      const es = (s.entries[rid] || []).filter(e => e.done);
+      if (!es.length) continue;
+      es.forEach(e => { if (e.reps == null && !e.checked) noReps.push({ session: s, entry: e, f }); });
+      const kgs = es.map(e => e.kg).filter(k => k != null);
+      if (kgs.length) hist.push({ s, es, kg: Math.max(...kgs) });
+    }
+    hist.forEach((h, i) => {
+      if (h.es.every(e => e.checked)) return; // già controllato dall'utente
+      const near = hist.slice(Math.max(0, i - 2), i).concat(hist.slice(i + 1, i + 3)).map(x => x.kg);
+      if (near.length < 2) return;
+      const m = med(near);
+      if (!h.kg) return; // passaggio a corpo libero: è una scelta, non un errore
+      const far = m > 0 ? (h.kg / m > 1.4 || h.kg / m < 0.6) : h.kg >= 40;
+      if (far && Math.abs(h.kg - m) >= 10) weights.push({ session: h.s, f, kg: h.kg, usual: m });
+    });
+  }
+
+  // 2) due sedute dello stesso giorno nella stessa data
+  const dupes = [], seen = {};
+  for (const s of done) {
+    const k = s.date + '|' + s.dayId;
+    if (seen[k]) dupes.push({ first: seen[k], second: s }); else seen[k] = s;
+  }
+
+  // 3) serie di esercizi che non esistono più nel programma
+  let orphanSets = 0; const orphanRows = new Set();
+  for (const s of done) for (const rid in s.entries) {
+    if (!rowsById[rid]) { orphanRows.add(rid); orphanSets += s.entries[rid].length; }
+  }
+  return { weights, noReps, dupes, orphanSets, orphanRows: orphanRows.size };
 }
 
 /* ---------- riscaldamento ---------- */

@@ -357,7 +357,10 @@ function showSummaryModal(changes, prs) {
     ? changes.map(c => `<div class="progress-change">
         <span>${esc(c.ex)} <span class="muted">${esc(c.row)}</span></span>
         <span class="${c.kind}">${c.kind === 'up' ? '▲ ' : c.kind === 'down' ? '▼ ' : ''}${esc(c.text)}</span>
-      </div>`).join('')
+      </div>${c.boost ? `<div class="boost-box">
+        <span>Hai fatto ${c.boost.reps} rep (obiettivo ${c.boost.repMax}): il peso è leggero. Vuoi un passo doppio?</span>
+        <button class="btn-mini" data-boost="${c.boost.rowId}" data-kg="${c.boost.kg}">Sali a ${fmtWeight(c.boost.kg)}</button>
+      </div>` : ''}`).join('')
     : '<p class="muted">Nessuna variazione calcolata.</p>';
   openModal(`
     <h2>Seduta completata</h2>
@@ -367,7 +370,13 @@ function showSummaryModal(changes, prs) {
       : 'Progressione suggerita (aggiornamento automatico disattivato):'}</p>
     ${rows}
     <div class="modal-actions"><button class="btn" data-close>OK</button></div>
-  `);
+  `).querySelectorAll('[data-boost]').forEach(b => b.addEventListener('click', () => {
+    const f = findRow(b.dataset.boost);
+    if (!f) return;
+    f.row.weight = parseFloat(b.dataset.kg);
+    saveState(); render();
+    b.disabled = true; b.textContent = '✓ ' + fmtWeight(f.row.weight);
+  }));
   render();
 }
 
@@ -724,7 +733,8 @@ function renderRow(ex, r, session) {
   } else {
     kgLabel = fmtWeight(r.weight);
   }
-  const lastNote = lastPerformance(r.id);
+  let lastNote = lastPerformance(r.id);
+  if (lastNote) lastNote = esc(lastNote) + lastTrend(r);
   if (!session) {
     // anteprima della giornata: cosa fare, in tre colonne ben allineate
     const rest = state.settings.rest[ex.restCat] || state.settings.rest.normale;
@@ -803,6 +813,103 @@ function lastPerformance(rowId) {
   if (f && f.row.type === 'tempo') return when + parts + ' sec';
   if (!entries[0].kg) return when + parts + ' rep'; // corpo libero: niente "0 kg"
   return when + fmtWeight(entries[0].kg) + ' × ' + parts;
+}
+
+/* Accanto a "Ultima": come cambia il peso di oggi rispetto all'ultima volta (solo serie con range). */
+function lastTrend(r) {
+  if (r.type !== 'range') return '';
+  const last = state.sessions
+    .filter(s => s.completed && (s.entries[r.id] || []).some(e => e.done && e.kg != null))
+    .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+  if (!last) return '';
+  const lastKg = Math.max(...last.entries[r.id].filter(e => e.done && e.kg != null).map(e => e.kg));
+  const diff = Math.round(((r.weight || 0) - lastKg) * 10) / 10;
+  if (!diff) return ' <span class="trend same">→ oggi stesso peso</span>';
+  const txt = fmtKg(toDisplayWeight(Math.abs(diff))) + ' ' + unitLabel();
+  return diff > 0 ? ` <span class="trend up">→ oggi +${txt} ↑</span>` : ` <span class="trend down">→ oggi −${txt} ↓</span>`;
+}
+
+/* =================== CONTROLLO DATI =================== */
+function dataCheckModal() {
+  const is = dataIssues();
+  const name = f => esc(f.ex.name) + ' <span class="muted">' + esc(f.row.label) + '</span>';
+  let html = '';
+  if (is.weights.length) {
+    html += `<div class="section-title">Pesi insoliti (${is.weights.length})</div>
+      <p class="muted small">Molto diversi dalle sedute vicine: errore di battitura o attrezzo diverso? Correggi il peso oppure conferma.</p>`
+      + is.weights.map((w, i) => `<div class="dc-item" data-w="${i}">
+        <div class="dc-txt">${name(w.f)}<br><span class="muted">${fmtDate(w.session.date)} · di solito ~${fmtWeight(w.usual)}</span></div>
+        <input class="dc-input" type="text" inputmode="decimal" value="${String(toDisplayWeight(w.kg)).replace('.', ',')}" aria-label="Peso">
+        <button class="btn-mini" data-dc="fix">Salva</button>
+        <button class="btn-mini" data-dc="ok">È giusto</button>
+      </div>`).join('');
+  }
+  if (is.noReps.length) {
+    html += `<div class="section-title">Serie senza ripetizioni (${is.noReps.length})</div>`
+      + is.noReps.map((n, i) => `<div class="dc-item" data-n="${i}">
+        <div class="dc-txt">${name(n.f)}<br><span class="muted">${fmtDate(n.session.date)} · ${n.entry.kg ? fmtWeight(n.entry.kg) : 'corpo'}</span></div>
+        <input class="dc-input" type="text" inputmode="numeric" placeholder="rep" aria-label="Ripetizioni">
+        <button class="btn-mini" data-dc="reps">Salva</button>
+        <button class="btn-mini" data-dc="del">Elimina</button>
+      </div>`).join('');
+  }
+  if (is.dupes.length) {
+    html += `<div class="section-title">Due sedute nello stesso giorno (${is.dupes.length})</div>
+      <p class="muted small">Se sono due allenamenti veri, correggi la data della seconda. Se è un doppione, eliminala.</p>`
+      + is.dupes.map((d, i) => { const day = getDay(d.second.dayId); return `<div class="dc-item" data-d="${i}">
+        <div class="dc-txt">${esc(day ? day.name : 'Giorno')}<br><span class="muted">2ª seduta del ${fmtDate(d.second.date)}</span></div>
+        <input class="dc-input dc-date" type="date" value="${d.second.date}" max="${todayISO()}" aria-label="Data">
+        <button class="btn-mini" data-dc="date">Salva</button>
+        <button class="btn-mini" data-dc="deldupe">Elimina</button>
+      </div>`; }).join('');
+  }
+  if (is.orphanSets) {
+    html += `<div class="section-title">Esercizi eliminati</div>
+      <div class="dc-item"><div class="dc-txt">${is.orphanSets} serie di ${is.orphanRows} esercizi che non sono più nel programma<br><span class="muted">Non compaiono nei grafici. Restano nel backup finché non le rimuovi.</span></div>
+      <button class="btn-mini" data-dc="orphans">Rimuovi</button></div>`;
+  }
+  if (!html) html = '<p class="muted">Tutto in ordine: nessun dato sospetto. ✓</p>';
+  const modal = openModal(`
+    <h2>Controllo dati</h2>
+    ${html}
+    <div class="modal-actions"><button class="btn" data-close>Chiudi</button></div>
+  `);
+  const reopen = () => { removeBackdrop(modal.parentElement); saveState(); render(); dataCheckModal(); };
+  modal.addEventListener('click', e => {
+    const b = e.target.closest('[data-dc]'); if (!b) return;
+    const item = b.closest('.dc-item'); const a = b.dataset.dc;
+    const val = item.querySelector('.dc-input') ? parseNum(item.querySelector('.dc-input').value) : null;
+    if (a === 'fix' || a === 'ok') {
+      const w = is.weights[+item.dataset.w];
+      const es = (w.session.entries[w.f.row.id] || []).filter(x => x.done);
+      if (a === 'fix') {
+        if (val == null || val < 0 || val > 1000) { toast('Inserisci un peso valido'); return; }
+        const kg = fromDisplayWeight(val);
+        es.forEach(x => { if (x.kg === w.kg) x.kg = kg; });
+      }
+      es.forEach(x => { x.checked = true; }); // non riproporlo più
+      reopen();
+    } else if (a === 'reps') {
+      if (val == null || val < 0 || val > 9999) { toast('Inserisci le ripetizioni'); return; }
+      const n = is.noReps[+item.dataset.n]; n.entry.reps = Math.round(val); reopen();
+    } else if (a === 'del') {
+      const n = is.noReps[+item.dataset.n];
+      const arr = n.session.entries[n.f.row.id]; arr.splice(arr.indexOf(n.entry), 1); reopen();
+    } else if (a === 'date') {
+      const v = item.querySelector('.dc-date').value;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(v) || v > todayISO()) { toast('Data non valida'); return; }
+      is.dupes[+item.dataset.d].second.date = v; reopen();
+    } else if (a === 'deldupe') {
+      if (!confirm('Eliminare questa seduta?')) return;
+      const s = is.dupes[+item.dataset.d].second;
+      state.sessions = state.sessions.filter(x => x.id !== s.id); reopen();
+    } else if (a === 'orphans') {
+      if (!confirm('Rimuovere dallo storico le serie degli esercizi eliminati? Fai prima un backup con "Esporta" se vuoi conservarle.')) return;
+      const ids = new Set(); for (const d of state.days) for (const ex of d.exercises) for (const r of ex.rows) ids.add(r.id);
+      for (const s of state.sessions) if (s.completed) for (const rid of Object.keys(s.entries)) if (!ids.has(rid)) delete s.entries[rid];
+      reopen();
+    }
+  });
 }
 
 /* =================== VISTA: GRAFICI =================== */
@@ -1128,6 +1235,12 @@ function renderProfileBackup() {
           <button class="btn secondary" style="flex:1" data-action="sync-join">Ho già un codice</button>
         </div>
       `}
+    </div>
+
+    <div class="card">
+      <h3>Controllo dati</h3>
+      <p class="muted" style="margin-bottom:10px">Cerca nello storico pesi insoliti, sedute doppie e serie incomplete. Non cambia nulla da solo: decidi tu caso per caso.</p>
+      <button class="btn secondary full" data-action="data-check">Controlla lo storico</button>
     </div>
 
     <div class="card">
@@ -1910,6 +2023,7 @@ function handleAction(a, btn) {
       syncDisable(); render();
       toast('Sync disattivato. I dati restano su questo dispositivo e nel cloud.');
     }
+    else if (a === 'data-check') dataCheckModal();
     else if (a === 'export') exportData();
     else if (a === 'import') {
       const fi = $('#import-file');

@@ -857,3 +857,12 @@ details.warmup-box summary span:first-child { white-space: nowrap; }
 .day-muscles summary::after { content: '›'; font-size: 1.2rem; transform: rotate(90deg); transition: transform .2s; }
 .day-muscles[open] summary::after { transform: rotate(-90deg); }
 .day-muscles .chip-wrap { margin: 4px 0 0; }
+
+/* Proposta di passo doppio (riepilogo seduta) + andamento accanto a "Ultima" */
+.boost-box { display: flex; align-items: center; gap: 10px; justify-content: space-between; background: var(--surface-2); border-radius: var(--radius-sm); padding: 10px 12px; margin: 8px 0; font-size: .8rem; color: var(--ink-muted); }
+.boost-box .btn-mini { flex: 0 0 auto; }
+.trend { white-space: nowrap; font-weight: 600; }
+/* Controllo dati */
+.dc-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 0; border-bottom: .5px solid var(--border); font-size: .86rem; }
+.dc-txt { flex: 1 1 100%; }
+.dc-input { flex: 1 1 70px; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; border: .5px solid var(--border); background: var(--surface-2); color: var(--ink); font-size: 1rem; }
