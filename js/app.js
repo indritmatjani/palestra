@@ -32,6 +32,7 @@ let currentView = 'home';
 let selectedDayId = state.uiSelectedDay || 'A';
 let editMode = false;
 let profileTab = 'profilo'; // sotto-sezione del Profilo: 'profilo' | 'allenamento' | 'backup'
+let chartMetric = 'kg'; // grafico esercizio: 'kg' (peso massimo) | '1rm' (massimale stimato)
 let chartRange = '6'; // periodo grafici: '6' (ultimi 6 allenamenti) | '90' (3 mesi) | 'all'
 let progressTab = 'grafici'; // sotto-sezione di Progressi: 'grafici' | 'muscoli'
 let chartExRowId = null;
@@ -274,21 +275,14 @@ function startSession(dayId) {
   const entries = {};
   for (const ex of day.exercises) {
     for (const r of ex.rows) {
-      // rep pre-compilate col target: nel caso tipico basta un tap sul ✓
-      let n, defReps;
-      if (r.type === 'russo') {
-        const sch = RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)];
-        n = sch[0]; defReps = sch[1];
-      } else if (r.type === 'reps' || r.type === 'tempo') {
-        // a cedimento: parto dal record precedente, così basta ritoccare in su
-        n = r.sets || 1; defReps = bestRepsFor(r.id) || null;
-      } else {
-        n = r.sets || 1; defReps = r.repMax || null;
-      }
-      entries[r.id] = Array.from({ length: n }, () => ({ kg: effectiveWeight(r.weight), reps: defReps, done: false }));
+      // le rep partono VUOTE: vanno scritte quelle fatte davvero (il ✓ non si attiva senza),
+      // così un tocco per sbaglio non registra rep mai fatte e non fa salire il peso per errore
+      const n = r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1);
+      entries[r.id] = Array.from({ length: n }, () => ({ kg: effectiveWeight(r.weight), reps: null, done: false }));
     }
   }
-  const session = { id: uid(), date: todayISO(), dayId, entries, completed: false };
+  const session = { id: uid(), date: todayISO(), dayId, entries, completed: false, startedAt: Date.now() };
+  focusExId = null;
   state.sessions.push(session);
   state.activeSessionId = session.id;
   saveState();
@@ -604,7 +598,7 @@ function renderWorkout() {
       <div class="session-bar-top">
         <div style="min-width:0">
           <div class="card-title">${esc(day.name)}</div>
-          <div class="muted">${done}/${all.length} serie · ${pct}%</div>
+          <div class="muted">${done}/${all.length} serie · ${pct}%${session.startedAt ? ` · <span id="session-elapsed">${sessionElapsed(session)}</span>` : ''}</div>
         </div>
         <div class="row-gap">
           <button class="btn-mini danger" data-action="cancel-session">Annulla</button>
@@ -633,7 +627,10 @@ function renderWorkout() {
   </div>`;
 
   // esercizi
-  html += day.exercises.map((ex, i) => renderExercise(ex, i, day, session)).join('');
+  const openId = session && !editMode ? sessionOpenExId(day, session) : null;
+  html += day.exercises.map((ex, i) => (session && !editMode && ex.id !== openId)
+    ? renderExerciseCollapsed(ex, i, day, session)
+    : renderExercise(ex, i, day, session)).join('');
 
   if (editMode) {
     html += `<button class="btn secondary full" data-action="add-exercise" data-day="${day.id}">+ Aggiungi esercizio</button>`;
@@ -644,6 +641,44 @@ function renderWorkout() {
   }
 
   return html;
+}
+
+/* ---- Seduta "un esercizio alla volta": uno solo aperto, gli altri in una riga ---- */
+let focusExId = null;
+function exAllDone(ex, session) {
+  const all = ex.rows.flatMap(r => session.entries[r.id] || []);
+  return all.length > 0 && all.every(e => e.done);
+}
+function sessionOpenExId(day, session) {
+  if (focusExId && day.exercises.some(e => e.id === focusExId)) return focusExId;
+  const next = day.exercises.find(e => !exAllDone(e, session));
+  return next ? next.id : null;
+}
+function sessionElapsed(session) {
+  const min = Math.max(0, Math.floor((Date.now() - session.startedAt) / 60000));
+  return min < 60 ? min + ' min' : Math.floor(min / 60) + ' h ' + String(min % 60).padStart(2, '0');
+}
+setInterval(() => {
+  const el = document.getElementById('session-elapsed'); const s = el && activeSession();
+  if (s && s.startedAt) el.textContent = sessionElapsed(s);
+}, 20000);
+function renderExerciseCollapsed(ex, index, day, session) {
+  const done = exAllDone(ex, session);
+  const entries = ex.rows.flatMap(r => (session.entries[r.id] || []).map(e => ({ e, r })));
+  const nDone = entries.filter(x => x.e.done).length;
+  let sub;
+  if (nDone) {
+    sub = entries.filter(x => x.e.done).map(x => x.r.type === 'tempo' ? (x.e.reps || 0) + 's'
+      : x.e.kg ? fmtKg(toDisplayWeight(x.e.kg)) + '×' + (x.e.reps || 0) : (x.e.reps || 0) + ' rep').join(' · ');
+    if (!done) sub += ' · ' + nDone + '/' + entries.length + ' serie';
+  } else {
+    sub = entries.length + (entries.length === 1 ? ' serie' : ' serie') + ' · da fare';
+  }
+  return `<button class="ex-card ex-collapsed ${done ? 'ex-done' : ''}" data-action="focus-ex" data-ex="${ex.id}">
+    <span class="exc-num">${done ? '✓' : index + 1}</span>
+    <span class="exc-main"><span class="exc-name">${esc(ex.name)}</span><span class="exc-sub">${esc(sub)}</span></span>
+    <span class="exc-chev">›</span>
+  </button>`;
 }
 
 function dayMusclesShort(day) {
@@ -686,12 +721,12 @@ function renderExercise(ex, index, day, session) {
   // riscaldamento
   if (ex.warmup && ex.warmup !== 'none') {
     const s1 = ex.rows[0] ? effectiveWeight(ex.rows[0].weight) : 0; // in settimana di scarico: sul peso ridotto
-    const steps = warmupSteps(ex.warmup, s1);
+    const steps = warmupSteps(ex.warmup, s1, isBodyweightEx(ex));
     if (steps.length && s1 > 0) {
       html += `<details class="warmup-box">
-        <summary class="warmup-title"><span>Riscaldamento ${ex.warmup === 'full' ? 'completo' : 'ridotto'}</span><span class="muted">${steps.map(st => fmtKg(toDisplayWeight(st.kg))).join(' · ')} ${unitLabel()}</span></summary>
+        <summary class="warmup-title"><span>Riscaldamento ${ex.warmup === 'full' ? 'completo' : 'ridotto'}</span><span class="muted">${steps.map(st => st.body ? 'corpo' : fmtKg(toDisplayWeight(st.kg))).join(' · ')} ${unitLabel()}</span></summary>
         ${steps.map(st => `<div class="wu-row">
-          <span>${st.pct}% → <strong>${fmtWeight(st.kg)}</strong> × ${st.reps}</span>
+          <span>${st.body ? 'Senza zavorra' : st.pct + '%'} → <strong>${st.body ? 'corpo libero' : fmtWeight(st.kg)}</strong> × ${st.reps}</span>
           <button class="btn-mini" data-action="warmup-timer">Rest ${fmtTime(state.settings.warmupRest)}</button>
         </div>`).join('')}
       </details>`;
@@ -765,6 +800,8 @@ function renderRow(ex, r, session) {
 
   if (session) {
     const entries = session.entries[r.id] || [];
+    const repHint = r.type === 'russo' ? String(RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][1])
+      : r.type === 'range' ? r.repMin + '–' + r.repMax : (prevBest ? '>' + prevBest : 'max');
     html += r.type === 'tempo'
       ? `<div class="set-cols tempo-row"><span>#</span><span>Cronometro</span><span>Secondi</span><span>✓</span></div>`
       : `<div class="set-cols"><span>#</span><span>${unitLabel()}</span><span>Ripetizioni</span><span>✓</span></div>`;
@@ -786,7 +823,7 @@ function renderRow(ex, r, session) {
           data-entry="${r.id}" data-i="${i}" data-field="kg" aria-label="${unitLabel()}">
         <div class="rep-stepper">
           <button class="step-btn" data-action="step-reps" data-entry="${r.id}" data-i="${i}" data-d="-1" aria-label="Meno una rep">−</button>
-          <input type="text" inputmode="numeric" placeholder="rep" value="${e.reps != null ? e.reps : ''}"
+          <input type="text" inputmode="numeric" placeholder="${repHint}" value="${e.reps != null ? e.reps : ''}"
             data-entry="${r.id}" data-i="${i}" data-field="reps" aria-label="rep">
           <button class="step-btn" data-action="step-reps" data-entry="${r.id}" data-i="${i}" data-d="1" aria-label="Più una rep">+</button>
         </div>
@@ -811,7 +848,7 @@ function lastPerformance(rowId) {
   const f = findRow(rowId);
   const when = 'Ultima (' + fmtDate(sessions[0].date) + '): ';
   if (f && f.row.type === 'tempo') return when + parts + ' sec';
-  if (!entries[0].kg) return when + parts + ' rep'; // corpo libero: niente "0 kg"
+  if (!entries[0].kg || (f && f.row.type !== 'tempo' && !f.row.weight)) return when + parts + ' rep'; // corpo libero: niente kg
   return when + fmtWeight(entries[0].kg) + ' × ' + parts;
 }
 
@@ -931,13 +968,9 @@ function renderCharts() {
       <div class="form-row"><select id="chart-ex-select">
         ${opts.map(o => `<option value="${o.id}" ${o.id === chartExRowId ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select></div>
+      <div class="seg seg-sm">${[['kg', 'Peso massimo'], ['1rm', 'Massimale stimato']].map(([k, l]) => `<button data-action="chart-metric" data-metric="${k}" class="${chartMetric === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div class="seg seg-sm">${[['6', 'Ultimi 6'], ['90', '3 mesi'], ['all', 'Tutto']].map(([k, l]) => `<button data-action="chart-range" data-range="${k}" class="${chartRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="chart-exercise"></div>
-    </div>
-    <div class="chart-box">
-      <h3>Trend 1RM stimato</h3>
-      <div class="sub">Massimale stimato (Epley) da serie fino a 12 rep · 🪶 = scarico</div>
-      <div id="chart-e1rm"></div>
     </div>
     <div class="chart-box">
       <h3>Volume per seduta</h3>
@@ -953,8 +986,8 @@ function renderCharts() {
       <div id="cal-heatmap"></div>
     </div>
     <div class="chart-box">
-      <h3>Volume per muscolo</h3>
-      <div class="sub">Carico (kg × rep) degli ultimi 30 giorni · confronto settimana</div>
+      <h3>Serie per muscolo</h3>
+      <div class="sub">Serie a settimana previste dal programma (muscolo principale 1, secondari ½). La tacca è a 10: il riferimento per crescere.</div>
       <div id="vol-week"></div>
       <div id="vol-muscle"></div>
     </div>
@@ -1004,14 +1037,12 @@ function mountCharts() {
       const unit = r.type === 'tempo' ? 'sec' : 'rep';
       if (sub) sub.textContent = (unit === 'sec' ? 'Secondi migliori' : 'Ripetizioni migliori') + ' per seduta (esercizio senza peso o a cedimento)';
       lineChart($('#chart-exercise'), [{ name: unit, color: '#0a84ff', points: pick(rowRepsHistory(chartExRowId)) }], { unit });
+    } else if (chartMetric === '1rm') {
+      if (sub) sub.textContent = 'Massimale stimato (Epley) da serie fino a 12 rep · 🪶 = scarico';
+      lineChart($('#chart-exercise'), [{ name: '1RM', color: '#30d158', points: pick(e1RMHistory(chartExRowId)) }], { unit: 'kg' });
     } else {
       if (sub) sub.textContent = 'Peso massimo per seduta · 🪶 = settimana di scarico';
       lineChart($('#chart-exercise'), [{ name: 'kg', color: '#0a84ff', points: pick(wPts) }], { unit: 'kg' });
-    }
-    const e1 = $('#chart-e1rm');
-    if (e1) {
-      if (byReps) e1.innerHTML = '<div class="chart-empty">Il massimale stimato serve per gli esercizi con peso.</div>';
-      else lineChart(e1, [{ name: '1RM', color: '#30d158', points: pick(e1RMHistory(chartExRowId)) }], { unit: 'kg' });
     }
   } else {
     $('#chart-exercise').innerHTML = '<div class="chart-empty">Nessun esercizio.</div>';
@@ -1025,32 +1056,30 @@ function mountCharts() {
   // calendario costanza
   const cal = $('#cal-heatmap'); if (cal) cal.innerHTML = calendarHeatmap(16);
 
-  // confronto volume settimanale
+  // serie fatte: questa settimana contro la scorsa
   const vw = $('#vol-week');
   if (vw) {
-    const cur = weekVolume(0), prev = weekVolume(1);
-    const diff = prev ? Math.round((cur - prev) / prev * 100) : 0;
-    const arrow = cur > prev ? '▲' : cur < prev ? '▼' : '=';
-    const cls = cur > prev ? 'up' : cur < prev ? 'down' : 'same';
-    vw.innerHTML = `<div class="vol-week-row">
-      <div><div class="stat-num">${cur.toLocaleString('it')}</div><div class="muted small">questa sett. (kg·rep)</div></div>
-      <div class="${cls} strong">${arrow} ${prev ? Math.abs(diff) + '%' : '—'}</div>
-      <div style="text-align:right"><div class="stat-num">${prev.toLocaleString('it')}</div><div class="muted small">scorsa sett.</div></div>
+    const cur = weekSets(0), prev = weekSets(1);
+    vw.innerHTML = (!cur && !prev) ? '<div class="muted small" style="margin-bottom:12px">Nessuna seduta in queste due settimane.</div>'
+      : `<div class="vol-week-row">
+      <div><div class="stat-num">${cur}</div><div class="muted small">serie fatte questa sett.</div></div>
+      <div class="${cur > prev ? 'up' : cur < prev ? 'down' : 'same'} strong">${cur > prev ? '▲' : cur < prev ? '▼' : '='}</div>
+      <div style="text-align:right"><div class="stat-num">${prev}</div><div class="muted small">scorsa sett.</div></div>
     </div>`;
   }
 
-  // volume per gruppo muscolare (barre orizzontali)
+  // serie a settimana per muscolo (barre con tacca a 10)
   const vm = $('#vol-muscle');
   if (vm) {
-    const data = volumeByMuscle(30);
-    if (!data.length) { vm.innerHTML = '<div class="chart-empty">Nessun dato negli ultimi 30 giorni.</div>'; }
+    const data = setsByMuscle();
+    if (!data.length) { vm.innerHTML = '<div class="chart-empty">Aggiungi esercizi al programma per vedere le serie.</div>'; }
     else {
-      const max = data[0].volume || 1;
+      const max = Math.max(15, data[0].sets);
       vm.innerHTML = data.map(d => `<div class="vol-bar-row">
-        <span class="vol-bar-lbl">${esc(d.label)}</span>
-        <span class="vol-bar-track"><span class="vol-bar-fill" style="width:${Math.max(4, Math.round(d.volume / max * 100))}%"></span></span>
-        <span class="vol-bar-val">${d.volume.toLocaleString('it')}</span>
-      </div>`).join('');
+        <span class="vol-bar-lbl">${esc(d.label.split(' (')[0])}</span>
+        <span class="vol-bar-track sets"><span class="vol-bar-fill ${d.sets >= 10 ? 'ok' : d.sets >= 5 ? 'mid' : 'low'}" style="width:${Math.max(3, Math.round(d.sets / max * 100))}%"></span><i style="left:${Math.round(10 / max * 100)}%"></i></span>
+        <span class="vol-bar-val">${fmtKg(d.sets)}</span>
+      </div>`).join('') + '<div class="muted tiny" style="margin-top:8px">Verde: 10 o più · giallo: 5–9 · rosso: meno di 5</div>';
     }
   }
 }
@@ -1861,6 +1890,11 @@ function handleAction(a, btn) {
     else if (a === 'show-how') showHowToModal(btn.dataset.ex);
     else if (a === 'ex-history') exerciseHistoryModal(btn.dataset.ex);
     else if (a === 'ex-menu') exerciseMenu(btn.dataset.day, btn.dataset.ex);
+    else if (a === 'focus-ex') {
+      focusExId = btn.dataset.ex; render();
+      const card = $('#view').querySelector(`.ex-card[data-ex="${focusExId}"]`);
+      if (card) window.scrollTo({ top: Math.max(0, card.getBoundingClientRect().top + window.scrollY - 150), behavior: 'smooth' });
+    }
     else if (a === 'finish-session') finishSession();
     else if (a === 'cancel-session') cancelSession();
     else if (a === 'cardio-timer') startTimer(state.settings.warmupName || 'Riscaldamento', state.settings.cardioSeconds);
@@ -1878,7 +1912,15 @@ function handleAction(a, btn) {
       const s = activeSession(); if (!s) return;
       const arr = s.entries[btn.dataset.entry]; if (!arr) return;
       const entry = arr[parseInt(btn.dataset.i)]; if (!entry) return;
-      entry.reps = Math.max(0, (entry.reps || 0) + parseInt(btn.dataset.d));
+      if (entry.reps == null) {
+        const f = findRow(btn.dataset.entry), r = f && f.row;
+        const last = state.sessions.filter(x => x.completed && (x.entries[btn.dataset.entry] || []).some(e => e.done && e.reps != null))
+          .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+        const le = last && last.entries[btn.dataset.entry].filter(e => e.done && e.reps != null);
+        entry.reps = le && le.length ? le[Math.min(parseInt(btn.dataset.i), le.length - 1)].reps
+          : r && r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][1]
+          : r && r.type === 'range' ? r.repMin : 1;
+      } else entry.reps = Math.max(0, entry.reps + parseInt(btn.dataset.d));
       saveState();
       // aggiornamento mirato dell'input (niente re-render: più fluido e non perde lo scroll)
       const inp = $('#view').querySelector(`input[data-entry="${btn.dataset.entry}"][data-i="${btn.dataset.i}"][data-field="reps"]`);
@@ -1889,6 +1931,12 @@ function handleAction(a, btn) {
       const arr = s.entries[btn.dataset.entry]; if (!arr) return;
       const entry = arr[parseInt(btn.dataset.i)]; if (!entry) return;
       const rowId = btn.dataset.entry, iIdx = btn.dataset.i;
+      if (!entry.done && entry.reps == null) {
+        const inp = $('#view').querySelector(`input[data-entry="${rowId}"][data-i="${iIdx}"][data-field="reps"]`);
+        toast('Scrivi prima le ripetizioni fatte.');
+        if (inp) { inp.classList.add('need'); inp.focus(); setTimeout(() => inp.classList.remove('need'), 1200); }
+        return;
+      }
       entry.done = !entry.done;
       // rilevamento nuovo record (solo alla marcatura, batte il best delle sedute PASSATE)
       let isPR = false;
@@ -1906,7 +1954,21 @@ function handleAction(a, btn) {
         const cat = state.settings.rest[btn.dataset.cat] || state.settings.rest.normale;
         startTimer('Recupero', cat.seconds);
       }
+      // esercizio finito → si chiude e si apre il prossimo da fare
+      let advanced = null;
+      const fr = findRow(rowId), sDay = getDay(s.dayId);
+      if (entry.done && fr && sDay && !editMode && exAllDone(fr.ex, s)) {
+        const i0 = sDay.exercises.indexOf(fr.ex);
+        const next = sDay.exercises.slice(i0 + 1).find(x => !exAllDone(x, s)) || sDay.exercises.find(x => !exAllDone(x, s));
+        focusExId = next ? next.id : null;
+        advanced = next ? next.id : 'end';
+      }
       render();
+      if (advanced) {
+        const card = advanced === 'end' ? null : $('#view').querySelector(`.ex-card[data-ex="${advanced}"]`);
+        if (card) window.scrollTo({ top: Math.max(0, card.getBoundingClientRect().top + window.scrollY - 150), behavior: 'smooth' });
+        if (advanced === 'end') toast('Tutte le serie fatte: premi "Termina".');
+      }
       // micro-animazione sul ✓ appena renderizzato (+ celebrazione se è un record)
       const doneBtn = $('#view').querySelector(`button[data-action="toggle-done"][data-entry="${rowId}"][data-i="${iIdx}"]`);
       if (entry.done && doneBtn) {
@@ -1939,6 +2001,7 @@ function handleAction(a, btn) {
         saveState(); render();
       }
     }
+    else if (a === 'chart-metric') { chartMetric = btn.dataset.metric || 'kg'; render(); }
     else if (a === 'chart-range') { chartRange = btn.dataset.range || '6'; render(); }
     else if (a === 'prtab') { progressTab = btn.dataset.prtab || 'grafici'; render(); }
     else if (a === 'ptab') {

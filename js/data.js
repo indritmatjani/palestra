@@ -781,6 +781,30 @@ function volumeByMuscle(days) {
     .sort((a, b) => b.volume - a.volume);
 }
 
+/* Serie a settimana per muscolo, dal programma (ogni giorno una volta a settimana):
+   il primo muscolo dell'esercizio conta 1 per serie, gli altri ½. */
+function setsByMuscle() {
+  const by = {};
+  for (const d of state.days) for (const ex of d.exercises) {
+    const n = ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0);
+    (ex.muscles || []).forEach((m, i) => { by[m] = (by[m] || 0) + n * (i === 0 ? 1 : 0.5); });
+  }
+  return Object.entries(by).map(([m, v]) => ({ muscle: m, label: MUSCLES[m] || m, sets: v })).sort((a, b) => b.sets - a.sets);
+}
+/* Serie completate in una settimana (offset 0 = questa, 1 = scorsa). */
+function weekSets(offset) {
+  const d = new Date();
+  d.setDate(d.getDate() - ((d.getDay() + 6) % 7) - (offset || 0) * 7);
+  const end = new Date(d); end.setDate(end.getDate() + 6);
+  const iso = x => x.getFullYear() + '-' + String(x.getMonth() + 1).padStart(2, '0') + '-' + String(x.getDate()).padStart(2, '0');
+  let n = 0;
+  for (const s of state.sessions) {
+    if (!s.completed || s.date < iso(d) || s.date > iso(end)) continue;
+    for (const rid in s.entries) n += s.entries[rid].filter(e => e.done).length;
+  }
+  return n;
+}
+
 /* Volume totale di una settimana (offset 0 = questa, 1 = scorsa). */
 function weekVolume(offset) {
   const d = new Date();
@@ -954,8 +978,17 @@ function dataIssues() {
 }
 
 /* ---------- riscaldamento ---------- */
-function warmupSteps(kind, s1Weight) {
+/* Trazioni, dips e simili: il corpo è già gran parte del carico. */
+function isBodyweightEx(ex) {
+  return /pull-?up|chin-?up|\bdips?\b|muscle-?up|trazion/i.test((ex.dsName || '') + ' ' + (ex.name || ''));
+}
+function warmupSteps(kind, s1Weight, bodyweight) {
   const w = s1Weight || 0;
+  if (bodyweight && kind !== 'none') {
+    // prima senza zavorra, poi si sale: 5 kg di zavorra su 97 di corpo non sono un riscaldamento
+    const up = [{ pct: 50, kg: roundToPlate(w * 0.50), reps: 3 }, { pct: 70, kg: roundToPlate(w * 0.70), reps: 1 }];
+    return [{ pct: 0, kg: 0, reps: 5, body: true }].concat(kind === 'full' ? up : up.slice(1)).filter(st => st.body || st.kg > 0);
+  }
   if (kind === 'full') {
     return [
       { pct: 20, kg: roundToPlate(w * 0.20), reps: 5 },

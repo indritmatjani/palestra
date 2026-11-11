@@ -36,7 +36,7 @@
   --yellow: #ffd60a;
   --warn-ink: #ffd60a;
   --warn-soft: rgba(255, 214, 10, .12);
-  --bar-bg: rgba(22, 22, 24, .78);
+  --bar-bg: rgba(22, 22, 24, .94);
   --toast-bg: rgba(44, 44, 46, .92);
   --shadow: 0 10px 40px rgba(0, 0, 0, .5);
   --backdrop: rgba(0, 0, 0, .55);
@@ -61,7 +61,7 @@
   --yellow: #ffcc00;
   --warn-ink: #b25000;
   --warn-soft: rgba(255, 149, 0, .12);
-  --bar-bg: rgba(249, 249, 251, .82);
+  --bar-bg: rgba(249, 249, 251, .94);
   --toast-bg: rgba(255, 255, 255, .94);
   --shadow: 0 10px 40px rgba(0, 0, 0, .14);
   --backdrop: rgba(0, 0, 0, .3);
@@ -866,3 +866,20 @@ details.warmup-box summary span:first-child { white-space: nowrap; }
 .dc-item { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 0; border-bottom: .5px solid var(--border); font-size: .86rem; }
 .dc-txt { flex: 1 1 100%; }
 .dc-input { flex: 1 1 70px; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; border: .5px solid var(--border); background: var(--surface-2); color: var(--ink); font-size: 1rem; }
+
+/* Seduta: esercizi chiusi in una riga (uno solo aperto alla volta) */
+.ex-card.ex-collapsed { display: flex; align-items: center; gap: 12px; width: 100%; padding: 12px 14px; text-align: left; color: var(--ink); min-height: 56px; }
+.ex-card.ex-collapsed.ex-done { opacity: .6; }
+.exc-num { flex: 0 0 28px; height: 28px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; font-size: .8rem; font-weight: 700; color: var(--ink-muted); }
+.ex-collapsed.ex-done .exc-num { background: var(--good); color: #fff; }
+.exc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.exc-name { font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exc-sub { font-size: .78rem; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.exc-chev { color: var(--ink-muted); font-size: 1.2rem; }
+.set-row input.need { box-shadow: 0 0 0 2px var(--red); }
+/* Serie per muscolo: tacca di riferimento a 10 */
+.vol-bar-track.sets { position: relative; overflow: visible; }
+.vol-bar-track.sets i { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--ink-muted); border-radius: 1px; }
+.vol-bar-fill.ok { background: var(--good); } .vol-bar-fill.mid { background: var(--yellow); } .vol-bar-fill.low { background: var(--red); }
+.set-row input::placeholder { font-weight: 400; opacity: .5; }
+.vol-bar-val { min-width: 34px; text-align: right; }
