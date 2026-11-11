@@ -1799,6 +1799,14 @@ function bindView() {
       const ok = val != null && isFinite(val) && val >= 0;
       if (inp.dataset.field === 'kg') e.kg = ok ? Math.min(1000, fromDisplayWeight(val)) : (inp.value.trim() === '' ? null : e.kg);
       else e.reps = ok ? Math.min(9999, Math.round(val)) : (inp.value.trim() === '' ? null : e.reps);
+      // peso molto diverso da quello previsto: avviso (non blocca), per evitare errori di battitura
+      if (ok && inp.dataset.field === 'kg') {
+        const f = findRow(inp.dataset.entry);
+        const plan = f && f.row.type !== 'tempo' ? effectiveWeight(f.row.weight || 0) : 0;
+        if (plan > 0 && e.kg > 0 && (e.kg / plan > 1.4 || e.kg / plan < 0.6) && Math.abs(e.kg - plan) >= 10) {
+          toast('Peso insolito: ' + fmtWeight(e.kg) + ' (previsto ' + fmtWeight(plan) + '). Controlla di aver scritto giusto.', { duration: 6000 });
+        }
+      }
       if (!ok && inp.value.trim() !== '') { inp.value = inp.dataset.field === 'kg' ? (e.kg != null ? String(toDisplayWeight(e.kg)).replace('.', ',') : '') : (e.reps != null ? e.reps : ''); toast('Inserisci un numero positivo'); }
       saveState();
     });
