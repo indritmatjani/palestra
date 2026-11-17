@@ -1708,7 +1708,7 @@ function editExerciseModal(dayId, exId) {
           ${Object.entries(state.settings.rest).map(([k, v]) => `<option value="${k}" ${ex.restCat === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
         </select>
       </div>
-      <div class="form-row" id="ee-rest-emom"><label>Recupero</label><div class="ee-static muted">Resto del minuto</div></div>
+
       <div class="form-row"><label>Riscaldamento</label>
         <select id="ee-warmup">
           <option value="none" ${ex.warmup === 'none' ? 'selected' : ''}>Nessuno (diretto)</option>
@@ -1735,11 +1735,11 @@ function editExerciseModal(dayId, exId) {
   const tmpRows = ex.rows.map(r => Object.assign({}, r));
 
   // Un esercizio fatto solo di righe EMOM non ha recupero tra le serie (si riposa nel resto del minuto):
-  // al posto della scelta del recupero mostro una spiegazione. Con righe miste il recupero resta.
+  // il campo "Recupero" sparisce del tutto. Con righe miste (EMOM + serie normali) resta.
   const syncRestField = () => {
     const onlyEmom = tmpRows.length > 0 && tmpRows.every(r => r.type === 'emom');
     modal.querySelector('#ee-rest-row').style.display = onlyEmom ? 'none' : '';
-    modal.querySelector('#ee-rest-emom').style.display = onlyEmom ? '' : 'none';
+
   };
   const rerenderRows = () => {
     modal.querySelector('#ee-rows').innerHTML = tmpRows.map(rowEditor).join('');
