@@ -1701,13 +1701,14 @@ function editExerciseModal(dayId, exId) {
       <div class="form-row"><label>Nota</label><input id="ee-note" value="${escAttr2(ex.note || '')}"></div>
       <div class="form-row"><label>Incremento (kg)</label><input id="ee-inc" type="text" inputmode="decimal" value="${String(ex.incKg || exIncrement(ex)).replace('.', ',')}"></div>
     </div>
-    <p class="muted small" style="margin:-4px 0 12px">Quanto sale (o scende) il peso quando arrivi al massimo del range. Su macchine ed esercizi leggeri usa 1 kg o il passo della macchina.</p>
+    <p class="muted small" style="margin:-4px 0 12px">Quanto sale (o scende) il peso quando arrivi al massimo del range (o al tetto dell'EMOM). Su macchine ed esercizi leggeri usa 1 kg o il passo della macchina.</p>
     <div class="form-grid-2">
-      <div class="form-row"><label>Recupero</label>
+      <div class="form-row" id="ee-rest-row"><label>Recupero</label>
         <select id="ee-rest">
           ${Object.entries(state.settings.rest).map(([k, v]) => `<option value="${k}" ${ex.restCat === k ? 'selected' : ''}>${esc(v.label)}</option>`).join('')}
         </select>
       </div>
+      <div class="form-row" id="ee-rest-emom"><label>Recupero</label><div class="ee-static muted">Resto del minuto</div></div>
       <div class="form-row"><label>Riscaldamento</label>
         <select id="ee-warmup">
           <option value="none" ${ex.warmup === 'none' ? 'selected' : ''}>Nessuno (diretto)</option>
@@ -1733,9 +1734,17 @@ function editExerciseModal(dayId, exId) {
   // stato temporaneo delle righe (copia)
   const tmpRows = ex.rows.map(r => Object.assign({}, r));
 
+  // Un esercizio fatto solo di righe EMOM non ha recupero tra le serie (si riposa nel resto del minuto):
+  // al posto della scelta del recupero mostro una spiegazione. Con righe miste il recupero resta.
+  const syncRestField = () => {
+    const onlyEmom = tmpRows.length > 0 && tmpRows.every(r => r.type === 'emom');
+    modal.querySelector('#ee-rest-row').style.display = onlyEmom ? 'none' : '';
+    modal.querySelector('#ee-rest-emom').style.display = onlyEmom ? '' : 'none';
+  };
   const rerenderRows = () => {
     modal.querySelector('#ee-rows').innerHTML = tmpRows.map(rowEditor).join('');
     bindRowEditors();
+    syncRestField();
   };
 
   const bindRowEditors = () => {
@@ -1766,6 +1775,7 @@ function editExerciseModal(dayId, exId) {
     });
   };
   bindRowEditors();
+  syncRestField();
 
   modal.querySelector('#ee-addrow').addEventListener('click', () => {
     tmpRows.push(row('S' + (tmpRows.length + 1), 'range', { repMin: 8, repMax: 10, weight: 20 }));

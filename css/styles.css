@@ -922,3 +922,6 @@ details.warmup-box summary span:first-child { white-space: nowrap; }
 #emom-panel.done .timer-progress > div { background: var(--good); }
 body.has-emom #timerbar { display: none; }
 body.has-emom #view { padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 250px); }
+
+/* campo di sola lettura nell'editor (es. recupero dell'EMOM), alto come i select */
+.ee-static { display: flex; align-items: center; min-height: 48px; padding: 0 14px; border-radius: var(--radius-sm); background: var(--surface-2); font-size: .95rem; }
