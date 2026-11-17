@@ -55,14 +55,93 @@ function uid() {
    'range'  → rep range: raggiunto il massimo del range aumenta il peso
    'reps'   → a cedimento: peso fisso, si progredisce battendo le RIPETIZIONI
    'tempo'  → a cedimento: si progredisce battendo i SECONDI (plank ecc.)
+   'emom'   → Every Minute On the Minute: per `minutes` minuti, all'inizio di ogni minuto
+              si fanno `repsPerMin` ripetizioni con `weight` kg e si riposa il resto del minuto.
+              Campi propri:
+                minutes     durata in minuti (= numero di "serie" registrate, una per minuto)
+                repsPerMin  ripetizioni obiettivo per minuto
+                repsCap     tetto di rep/min: raggiunto e completato, si aumenta il peso
+                resetReps   rep/min da cui ripartire dopo l'aumento di peso
+              L'incremento di peso è quello dell'esercizio (exIncrement → ex.incKg).
+              Progressione: tutti i minuti completati a obiettivo → +1 rep/min;
+              al tetto → +peso e si riparte da resetReps. Le serie EMOM sono sub-massimali
+              e in fatica: NON entrano nell'1RM stimato né nei record di forza.
    (il vecchio campo maxWeight, tetto della macchina, non è più usato) */
+
+/* Valori predefiniti dei campi EMOM: usati da row(), dall'editor (cambio tipo)
+   e da migrateState() per completare righe EMOM salvate senza qualche campo. */
+const EMOM_DEFAULTS = { minutes: 10, repsPerMin: 5, repsCap: 10, resetReps: 5 };
+function fillEmomDefaults(r) {
+  for (const k in EMOM_DEFAULTS) {
+    const v = Number(r[k]);
+    if (!(v > 0)) r[k] = EMOM_DEFAULTS[k];
+  }
+  // il tetto non può stare sotto il punto di ripartenza (altrimenti si salirebbe di peso a ogni seduta)
+  if (r.resetReps > r.repsCap) r.resetReps = r.repsCap;
+  if (r.weight == null || isNaN(r.weight)) r.weight = 0;
+  return r;
+}
+
 function row(label, type, opts) {
-  return Object.assign({
+  const r = Object.assign({
     id: uid(), label, type,
     repMin: 8, repMax: 10,
     schemeIndex: 0, russoIncrement: 5,
     weight: 0, sets: 1,
   }, opts);
+  // i campi EMOM si aggiungono solo alle righe EMOM: le altre restano identiche a prima
+  return type === 'emom' ? fillEmomDefaults(r) : r;
+}
+
+/* ---------- EMOM: funzioni di supporto ---------- */
+function isEmomRow(rowId) {
+  const f = findRow(rowId);
+  return !!(f && f.row.type === 'emom');
+}
+
+/* Riassunto di un EMOM in una seduta: rep per minuto (solo minuti segnati ✓),
+   totale e peso usato (il più alto tra i minuti fatti). null se non c'è nulla. */
+function emomSummary(session, rowId) {
+  const done = (session.entries[rowId] || []).filter(e => e.done);
+  if (!done.length) return null;
+  const reps = done.map(e => e.reps || 0);
+  const kgs = done.map(e => e.kg).filter(k => k != null);
+  return { reps, total: reps.reduce((a, b) => a + b, 0), kg: kgs.length ? Math.max(...kgs) : 0, date: session.date };
+}
+
+/* Ultima seduta completata con questo EMOM (prima di `beforeSessionId`, se dato).
+   Se `kg` è indicato, solo le sedute fatte con quel peso: il confronto del totale
+   ha senso solo a parità di carico (con più peso è normale fare meno rep). */
+function lastEmomSummary(rowId, opts) {
+  opts = opts || {};
+  const list = state.sessions
+    .filter(s => s.completed && s.id !== opts.excludeId && (!opts.beforeDate || s.date <= opts.beforeDate))
+    .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
+  for (const s of list) {
+    const sum = emomSummary(s, rowId);
+    if (!sum) continue;
+    if (opts.kg != null && Math.abs(sum.kg - opts.kg) > 0.01) continue;
+    return sum;
+  }
+  return null;
+}
+
+/* Record EMOM: miglior totale di rep per ciascun peso. [{kg, total, date}] ordinato per peso. */
+function emomBestByWeight(rowId, excludeId) {
+  const by = {};
+  for (const s of state.sessions) {
+    if (!s.completed || s.id === excludeId) continue;
+    const sum = emomSummary(s, rowId);
+    if (!sum) continue;
+    const k = String(sum.kg);
+    if (!by[k] || sum.total > by[k].total) by[k] = { kg: sum.kg, total: sum.total, date: s.date };
+  }
+  return Object.values(by).sort((a, b) => a.kg - b.kg);
+}
+
+/* "5-5-4-3-2 (totale 19 rep)" */
+function fmtEmomReps(sum) {
+  return sum.reps.join('-') + ' (totale ' + sum.total + ' rep)';
 }
 
 /* Miglior risultato (rep o secondi) mai registrato per una riga, prima di una data. */
@@ -277,6 +356,7 @@ function defaultState() {
       ...defaultSteadyCardio(),
     ],
     cardioSeeded: true,
+    emomSeeded: true, // gli EMOM della scheda personale non vanno aggiunti ai nuovi utenti
   };
 }
 
@@ -488,7 +568,11 @@ function migrateState(s) {
     if (!Array.isArray(d.exercises)) d.exercises = [];
     d.exercises.forEach(ex => {
       if (!(Number(ex.incKg) > 0)) ex.incKg = defaultIncFor(ex, s.settings && s.settings.smallIncrement);
-      (ex.rows || []).forEach(r => { if (r.failCount == null) r.failCount = 0; delete r.maxWeight; }); // tetto macchina: rimosso
+      (ex.rows || []).forEach(r => {
+        if (r.failCount == null) r.failCount = 0;
+        delete r.maxWeight; // tetto macchina: rimosso
+        if (r.type === 'emom') fillEmomDefaults(r); // EMOM salvati senza qualche campo → default
+      });
     });
   });
   if (!Array.isArray(s.cardio)) s.cardio = def.cardio;
@@ -511,6 +595,8 @@ function migrateState(s) {
     if (c.progressWeek === undefined) c.progressWeek = null;
     applyCardioWeek(c);
   });
+  // aggiunge una sola volta gli EMOM della scheda (flag emomSeeded, come cardioSeeded)
+  if (!s.emomSeeded) { seedEmomExercises(s); s.emomSeeded = true; }
   if (!s.settings.deload) s.settings.deload = def.settings.deload;
   // migrazione recuperi: chi aveva i VECCHI default (russo 360 / pesante 210)
   // passa ai nuovi (russo 3 min, top set+back off 5–7 min). Valori personalizzati restano.
@@ -523,6 +609,40 @@ function migrateState(s) {
   R.normale.label = def.settings.rest.normale.label;
   R.isolamento.label = def.settings.rest.isolamento.label;
   return s;
+}
+
+/* EMOM da aggiungere alla scheda come ULTIMO esercizio dei giorni A, B e C.
+   Gli id sono FISSI (non casuali): se la migrazione gira su due dispositivi collegati col sync,
+   creano lo stesso esercizio con lo stesso id e la fusione non produce doppioni.
+   Se un giorno non esiste o l'esercizio c'è già, viene saltato. */
+const EMOM_SEED = [
+  { day: 'A', id: 'emom-a-dip', rowId: 'emom-a-dip-r', name: 'EMOM Dip',
+    ds: { dsId: '0814', dsMedia: '0814-X6C6i5Y', dsName: 'triceps dip' },
+    muscles: ['tricipiti', 'petto', 'spalle'], incKg: 2.5,
+    row: { minutes: 10, repsPerMin: 6, weight: 0, repsCap: 10, resetReps: 5 } },
+  { day: 'B', id: 'emom-b-trazioni', rowId: 'emom-b-trazioni-r', name: 'EMOM Trazioni',
+    ds: { dsId: '0652', dsMedia: '0652-lBDjFxJ', dsName: 'pull-up' },
+    muscles: ['dorsali', 'bicipiti', 'avambracci'], incKg: 2.5,
+    row: { minutes: 10, repsPerMin: 4, weight: 0, repsCap: 10, resetReps: 4 } },
+  { day: 'C', id: 'emom-c-boxsquat', rowId: 'emom-c-boxsquat-r', name: 'EMOM Box squat',
+    // nel database non c'è il box squat: collego lo squat con bilanciere per immagine e istruzioni
+    ds: { dsId: '0043', dsMedia: '0043-qXTaZnJ', dsName: 'barbell full squat' },
+    muscles: ['quadricipiti', 'glutei', 'femorali'], incKg: 5,
+    note: 'Risalita esplosiva: se rallenta, non aumentare le rep',
+    row: { minutes: 10, repsPerMin: 5, weight: 20, repsCap: 10, resetReps: 5 } },
+];
+function seedEmomExercises(s) {
+  for (const it of EMOM_SEED) {
+    const day = (s.days || []).find(d => d.id === it.day);
+    if (!day) continue;
+    if (day.exercises.some(e => e.id === it.id || e.name === it.name)) continue;
+    day.exercises.push(Object.assign({
+      id: it.id, name: it.name, note: it.note || '',
+      restCat: 'isolamento', warmup: 'none',   // nell'EMOM il recupero è il resto del minuto
+      muscles: it.muscles.slice(), incKg: it.incKg,
+      rows: [row('S1', 'emom', Object.assign({ id: it.rowId, failCount: 0 }, it.row))],
+    }, it.ds));
+  }
 }
 
 function loadState() {
@@ -683,8 +803,12 @@ function e1RM(kg, reps) {
   return kg * (1 + reps / 30);
 }
 
-/* Miglior 1RM stimato storico per una riga (prima di una certa data, opzionale). */
+/* Miglior 1RM stimato storico per una riga (prima di una certa data, opzionale).
+   Le righe EMOM sono escluse: sono serie sub-massimali fatte in fatica (5 rep ogni minuto
+   per 10 minuti), la formula di Epley le scambierebbe per serie al limite e il massimale
+   risulterebbe falso. */
 function bestE1RM(rowId, beforeDate) {
+  if (isEmomRow(rowId)) return 0;
   let best = 0;
   for (const s of state.sessions) {
     if (!s.completed) continue;
@@ -699,6 +823,7 @@ function bestE1RM(rowId, beforeDate) {
 /* Serie storiche di 1RM stimato per una riga: [{x:date, y:1RM}] */
 function e1RMHistory(rowId) {
   const pts = [];
+  if (isEmomRow(rowId)) return pts; // EMOM: niente 1RM stimato (vedi bestE1RM)
   for (const s of state.sessions) {
     if (!s.completed) continue;
     let best = 0;
@@ -714,6 +839,7 @@ function e1RMHistory(rowId) {
 function allRecords() {
   const recs = [];
   for (const d of state.days) for (const ex of d.exercises) for (const r of ex.rows) {
+    if (r.type === 'emom') continue; // gli EMOM non sono record di forza
     const best = bestE1RM(r.id);
     if (best > 0) recs.push({ day: d, ex, row: r, e1rm: Math.round(best * 10) / 10 });
   }
@@ -728,7 +854,7 @@ function rowFullHistory(rowId) {
     const done = (s.entries[rowId] || []).filter(e => e.done);
     if (!done.length) continue;
     let best = 0;
-    for (const e of done) if (e.kg != null && e.reps) best = Math.max(best, e1RM(e.kg, e.reps));
+    if (!isEmomRow(rowId)) for (const e of done) if (e.kg != null && e.reps) best = Math.max(best, e1RM(e.kg, e.reps));
     out.push({
       date: s.date, dayId: s.dayId,
       sets: done.map(e => ({ kg: e.kg, reps: e.reps })),
@@ -783,10 +909,23 @@ function volumeByMuscle(days) {
 
 /* Serie a settimana per muscolo, dal programma (ogni giorno una volta a settimana):
    il primo muscolo dell'esercizio conta 1 per serie, gli altri ½. */
+/* Quante "serie" vale un EMOM nel conteggio per muscolo: 1 ogni 3 minuti (arrotondato, minimo 1).
+   Perché: in un EMOM ogni minuto è un mini-blocco di poche rep lontano dal cedimento.
+   Contarlo come 10 serie (una per minuto) gonfierebbe il volume di 2–3 volte rispetto a
+   serie vere portate vicino al limite; circa 3 minuti di EMOM producono lo stimolo
+   (numero di rep "pesanti" e fatica) di una serie allenante classica. È una stima prudente. */
+function emomSetEquivalent(minutes) {
+  return Math.max(1, Math.round((minutes || 0) / 3));
+}
+function rowWeeklySets(r) {
+  if (r.type === 'russo') return RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0];
+  if (r.type === 'emom') return emomSetEquivalent(r.minutes);
+  return r.sets || 1;
+}
 function setsByMuscle() {
   const by = {};
   for (const d of state.days) for (const ex of d.exercises) {
-    const n = ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0);
+    const n = ex.rows.reduce((m, r) => m + rowWeeklySets(r), 0);
     (ex.muscles || []).forEach((m, i) => { by[m] = (by[m] || 0) + n * (i === 0 ? 1 : 0.5); });
   }
   return Object.entries(by).map(([m, v]) => ({ muscle: m, label: MUSCLES[m] || m, sets: v })).sort((a, b) => b.sets - a.sets);
@@ -800,7 +939,11 @@ function weekSets(offset) {
   let n = 0;
   for (const s of state.sessions) {
     if (!s.completed || s.date < iso(d) || s.date > iso(end)) continue;
-    for (const rid in s.entries) n += s.entries[rid].filter(e => e.done).length;
+    for (const rid in s.entries) {
+      const done = s.entries[rid].filter(e => e.done).length;
+      // EMOM: i minuti fatti contano come serie con la stessa regola di setsByMuscle (1 ogni 3)
+      n += done && isEmomRow(rid) ? emomSetEquivalent(done) : done;
+    }
   }
   return n;
 }
@@ -835,6 +978,9 @@ function sessionDays() {
  range:  reps ≥ repMax → peso + incremento dell'esercizio ; nel range → uguale ; < repMin → peso − incremento
  russo:  tutte le serie completate a target → passo successivo dello schema;
          dopo 5x5 → peso + russoIncrement e si riparte da 3x3.
+ emom:   tutti i minuti ✓ con rep ≥ repsPerMin → repsPerMin + 1; se già a repsCap → peso + incremento
+         e repsPerMin = resetReps; altrimenti invariato. Il totale rep è confrontato con
+         l'ultima seduta allo stesso peso.
  Applica la progressione al programma dopo il completamento di una seduta.
  Ritorna la lista dei cambiamenti per il riepilogo. */
 function applyProgression(session) {
@@ -879,6 +1025,39 @@ function applyProgression(session) {
         } else {
           changes.push({ ex: ex.name, row: r.label, kind: 'up', text: russoLabel(idx) + ' → ' + russoLabel(idx + 1) });
           if (state.settings.autoProgress) r.schemeIndex = idx + 1;
+        }
+        continue;
+      }
+
+      // EMOM: si sale di 1 rep/min finché si completano TUTTI i minuti a obiettivo;
+      // arrivati al tetto (repsCap) si aumenta il peso e si riparte da resetReps.
+      if (r.type === 'emom') {
+        fillEmomDefaults(r);
+        const all = session.entries[r.id] || [];          // un elemento per minuto
+        const sum = emomSummary(session, r.id);
+        const target = r.repsPerMin;
+        // minuti "a obiettivo": segnati ✓ e con almeno le rep previste
+        const okMin = all.filter(e => e.done && (e.reps || 0) >= target).length;
+        const completed = all.length >= r.minutes && okMin >= r.minutes;
+        // confronto del TOTALE con l'ultima seduta allo stesso peso: mostrato sempre,
+        // così si vede il miglioramento anche quando non si sale di livello
+        const prev = lastEmomSummary(r.id, { excludeId: session.id, beforeDate: session.date, kg: sum.kg });
+        const diff = prev ? sum.total - prev.total : 0;
+        const note = 'Totale ' + sum.total + ' rep' + (prev
+          ? ' · la volta scorsa a ' + (sum.kg ? fmtKg(sum.kg) + ' kg' : 'corpo libero') + ': ' + prev.total + (diff ? ' (' + (diff > 0 ? '+' : '') + diff + ')' : ' (uguale)')
+          : ' · prima volta a ' + (sum.kg ? fmtKg(sum.kg) + ' kg' : 'corpo libero'));
+        if (completed && target < r.repsCap) {
+          changes.push({ ex: ex.name, row: r.label, kind: 'up', text: 'EMOM ' + target + ' → ' + (target + 1) + ' rep/min', note });
+          if (state.settings.autoProgress) r.repsPerMin = target + 1;
+        } else if (completed) {
+          const inc = exIncrement(ex);
+          const newW = roundHalf((r.weight || 0) + inc);
+          changes.push({ ex: ex.name, row: r.label, kind: 'up', text: '+' + fmtKg(inc) + ' kg (' + fmtKg(r.weight || 0) + ' → ' + fmtKg(newW) + '), riparti da ' + r.resetReps + ' rep/min', note });
+          if (state.settings.autoProgress) { r.weight = newW; r.repsPerMin = r.resetReps; }
+        } else {
+          changes.push({ ex: ex.name, row: r.label, kind: 'same',
+            text: 'Ripeti: ' + okMin + '/' + r.minutes + ' minuti a obiettivo, totale ' + sum.total + ' rep ('
+              + (prev ? 'la volta scorsa ' + prev.total : 'prima volta a ' + (sum.kg ? fmtKg(sum.kg) + ' kg' : 'corpo libero')) + ')' });
         }
         continue;
       }
@@ -938,6 +1117,8 @@ function dataIssues() {
   const done = state.sessions.filter(s => s.completed).slice().sort((a, b) => (a.date < b.date ? -1 : 1));
   const med = arr => { const a = arr.slice().sort((x, y) => x - y); const m = a.length >> 1; return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; };
 
+  // NB: qui non si controllano le RIPETIZIONI che calano da una serie all'altra: in un EMOM
+  // (5-5-4-3-2…) è il comportamento normale dovuto alla fatica, non un errore di inserimento.
   // 1) pesi molto diversi dalle sedute vicine (2 prima e 2 dopo) + rep mancanti
   const weights = [], noReps = [];
   for (const rid in rowsById) {

@@ -883,3 +883,42 @@ details.warmup-box summary span:first-child { white-space: nowrap; }
 .vol-bar-fill.ok { background: var(--good); } .vol-bar-fill.mid { background: var(--yellow); } .vol-bar-fill.low { background: var(--red); }
 .set-row input::placeholder { font-weight: 400; opacity: .5; }
 .vol-bar-val { min-width: 34px; text-align: right; }
+
+/* ---------- EMOM ---------- */
+.emom-start { margin: 6px 0 10px; }
+.emom-start[disabled] { opacity: .6; }
+.emom-total { text-align: center; font-size: .82rem; color: var(--ink-muted); padding: 8px 0 4px; }
+.emom-total strong { color: var(--ink); }
+.emom-recs { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin-top: 10px; }
+.progress-note { font-size: .78rem; color: var(--ink-muted); text-align: right; padding: 0 0 8px; margin-top: -4px; border-bottom: .5px solid var(--border); }
+/* pannello del timer EMOM: sopra la barra delle schede, come il timer di recupero ma più grande */
+#emom-panel {
+  position: fixed; z-index: 26;
+  left: 8px; right: 8px;
+  bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 8px);
+  max-width: 624px; margin: 0 auto;
+  padding: 12px 14px 12px;
+  background: var(--surface); color: var(--ink);
+  border: .5px solid var(--border); border-radius: 18px;
+  box-shadow: var(--shadow);
+  animation: slideUp .25s var(--ease);
+}
+#emom-panel .timer-progress { position: static; height: 4px; border-radius: 2px; overflow: hidden; margin: 8px 0 10px; }
+#emom-panel .timer-progress > div { height: 100%; background: var(--accent); transition: width .25s linear; }
+.emom-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.emom-info { display: flex; flex-direction: column; min-width: 0; }
+.emom-name { font-size: .78rem; color: var(--ink-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.emom-min { font-size: 1.15rem; font-weight: 700; }
+.emom-clock { font-family: var(--font-num); font-size: 2.4rem; font-weight: 750; font-variant-numeric: tabular-nums; letter-spacing: -.02em; }
+.emom-log { display: flex; align-items: center; gap: 8px; min-height: 48px; justify-content: center; text-align: center; }
+.emom-log-lbl { font-size: .82rem; color: var(--ink-muted); flex: 1; text-align: left; }
+.emom-log-val { min-width: 40px; text-align: center; font-size: 1.5rem; font-weight: 750; font-variant-numeric: tabular-nums; }
+.step-btn.big { width: 48px; height: 48px; border-radius: 12px; background: var(--surface-2); font-size: 1.4rem; }
+#emom-panel .set-done { width: 48px; height: 48px; }
+.emom-actions { display: flex; gap: 8px; margin-top: 10px; }
+.emom-actions .btn-mini { flex: 1; min-height: 44px; }
+#emom-panel.paused .emom-clock { opacity: .45; }
+#emom-panel.done { border-color: var(--good); }
+#emom-panel.done .timer-progress > div { background: var(--good); }
+body.has-emom #timerbar { display: none; }
+body.has-emom #view { padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom) + 250px); }

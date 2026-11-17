@@ -67,7 +67,7 @@ const timer = { endAt: null, total: 0, label: '', interval: null, fired: false }
 let wakeLock = null;
 
 // usato da index.html: non ricaricare l'app (aggiornamento SW) mentre c'è un timer o un cardio in corso
-window.__busyNow = () => !!(timer.endAt && !timer.fired) || !!document.querySelector('.cardio-fs') || !!activeSession();
+window.__busyNow = () => !!(timer.endAt && !timer.fired) || !!document.querySelector('.cardio-fs') || !!activeSession() || emomRunning();
 
 async function acquireWakeLock() {
   try {
@@ -83,6 +83,7 @@ document.addEventListener('visibilitychange', () => {
     acquireWakeLock();
     tickTimer(); // riallinea il conteggio dopo il background
   }
+  if (document.visibilityState === 'visible' && emomRunning()) { acquireWakeLock(); emomTick(); }
 });
 
 function startTimer(label, seconds) {
@@ -100,18 +101,20 @@ function startTimer(label, seconds) {
   tickTimer();
 }
 
-// bip breve (conto alla rovescia ultimi secondi del recupero)
-function tickBeep() {
+// bip breve (conto alla rovescia ultimi secondi del recupero).
+// freq/dur facoltativi: l'EMOM lo riusa con un tono più alto e lungo per il "via" di ogni minuto.
+function tickBeep(freq, dur) {
+  freq = freq || 760; dur = dur || 0.12;
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === 'suspended') audioCtx.resume();
     const o = audioCtx.createOscillator(), g = audioCtx.createGain();
-    o.type = 'sine'; o.frequency.value = 760; o.connect(g); g.connect(audioCtx.destination);
+    o.type = 'sine'; o.frequency.value = freq; o.connect(g); g.connect(audioCtx.destination);
     const t = audioCtx.currentTime;
     g.gain.setValueAtTime(0.0001, t);
     g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.12);
-    o.start(t); o.stop(t + 0.14);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.start(t); o.stop(t + dur + 0.02);
   } catch (e) {}
 }
 
@@ -204,6 +207,163 @@ $('#timer-minus').addEventListener('click', () => {
   tickTimer();
 });
 
+/* =================== TIMER EMOM ===================
+   Conto alla rovescia di 60 s ripetuto per `minutes` volte. Il tempo si calcola dai timestamp
+   (non contando i tick), quindi resta preciso anche se iPhone rallenta i timer in background.
+   Riusa: tickBeep (avviso a 3 s e "via"), alarm (fine), navigator.vibrate e il wake lock
+   del timer di recupero. Mentre corre si possono registrare le rep dei minuti con − / + e ✓,
+   senza chiudere il timer. */
+const emom = {
+  rowId: null, minutes: 0,
+  startAt: 0,        // quando è partito il minuto 1
+  pausedAt: null,    // != null mentre è in pausa
+  pausedMs: 0,       // millisecondi totali passati in pausa (da togliere al tempo trascorso)
+  lastMinute: -1,    // ultimo minuto per cui è suonato il "via"
+  lastBeep: null,    // ultimo secondo per cui è suonato l'avviso (evita doppioni)
+  finished: false,
+  interval: null,
+};
+function emomRunning() { return !!emom.rowId && !emom.finished; }
+function emomElapsedMs() {
+  const now = emom.pausedAt != null ? emom.pausedAt : Date.now();
+  return Math.max(0, now - emom.startAt - emom.pausedMs);
+}
+
+function startEmom(rowId) {
+  const s = activeSession(); if (!s) { toast('Prima premi "Inizia seduta".'); return; }
+  const f = findRow(rowId); if (!f || f.row.type !== 'emom') return;
+  hideTimer(); // niente timer di recupero durante un EMOM: il recupero è il resto del minuto
+  clearInterval(emom.interval);
+  Object.assign(emom, { rowId, minutes: (s.entries[rowId] || []).length || f.row.minutes, startAt: Date.now(),
+    pausedAt: null, pausedMs: 0, lastMinute: -1, lastBeep: null, finished: false });
+  document.body.classList.add('has-emom');
+  acquireWakeLock();
+  emom.interval = setInterval(emomTick, 250);
+  render();   // il pulsante diventa "EMOM in corso…"
+  emomTick();
+}
+
+function stopEmom() {
+  clearInterval(emom.interval);
+  emom.rowId = null; emom.finished = false; emom.pausedAt = null;
+  releaseWakeLock();
+  document.body.classList.remove('has-emom');
+  const p = document.getElementById('emom-panel'); if (p) p.remove();
+}
+
+function toggleEmomPause() {
+  if (!emom.rowId || emom.finished) return;
+  if (emom.pausedAt != null) { emom.pausedMs += Date.now() - emom.pausedAt; emom.pausedAt = null; acquireWakeLock(); }
+  else { emom.pausedAt = Date.now(); releaseWakeLock(); }
+  emomTick();
+}
+
+/* Minuto da registrare: il primo non ancora segnato ✓ tra quelli già iniziati
+   (compreso quello in corso, così si può segnare durante il riposo dello stesso minuto). */
+function emomLogIndex(entries, minuteIdx) {
+  const upTo = Math.min(entries.length - 1, emom.finished ? entries.length - 1 : minuteIdx);
+  for (let i = 0; i <= upTo; i++) if (!entries[i].done) return i;
+  return -1;
+}
+
+function emomTick() {
+  if (!emom.rowId) return;
+  const s = activeSession();
+  if (!s || !s.entries[emom.rowId]) { stopEmom(); return; }
+  const totalMs = emom.minutes * 60000;
+  const el = emomElapsedMs();
+  if (!emom.finished && el >= totalMs) {
+    // fine dell'EMOM: allarme lungo + vibrazione, poi resta aperto per registrare l'ultimo minuto
+    emom.finished = true;
+    clearInterval(emom.interval);
+    alarm();
+    if (navigator.vibrate) navigator.vibrate([400, 150, 400, 150, 600]);
+    releaseWakeLock();
+  }
+  const minuteIdx = Math.min(emom.minutes - 1, Math.floor(el / 60000));
+  const remain = emom.finished ? 0 : Math.ceil((60000 - (el % 60000)) / 1000);
+  if (!emom.finished && emom.pausedAt == null) {
+    // inizio di un nuovo minuto: "via" (bip alto e lungo) + vibrazione
+    if (minuteIdx !== emom.lastMinute) {
+      emom.lastMinute = minuteIdx; emom.lastBeep = null;
+      tickBeep(1180, 0.35);
+      if (navigator.vibrate) navigator.vibrate([200, 80, 200]);
+    }
+    // avviso negli ultimi 3 secondi del minuto
+    if (remain <= 3 && remain >= 1 && emom.lastBeep !== remain) {
+      emom.lastBeep = remain; tickBeep();
+      if (navigator.vibrate) navigator.vibrate(80);
+    }
+  }
+  renderEmomPanel(s, minuteIdx, remain);
+}
+
+function renderEmomPanel(s, minuteIdx, remain) {
+  const f = findRow(emom.rowId);
+  const entries = s.entries[emom.rowId];
+  let p = document.getElementById('emom-panel');
+  if (!p) {
+    p = document.createElement('div');
+    p.id = 'emom-panel';
+    p.setAttribute('role', 'timer');
+    document.body.appendChild(p);
+    // un solo listener delegato: il contenuto viene riscritto a ogni tick
+    p.addEventListener('click', e => {
+      const b = e.target.closest('[data-emom]'); if (!b) return;
+      const ss = activeSession(); if (!ss) return;
+      const arr = ss.entries[emom.rowId] || [];
+      const i = parseInt(b.dataset.i);
+      const a = b.dataset.emom;
+      if (a === 'pause') toggleEmomPause();
+      else if (a === 'stop') stopEmom();
+      else if (a === 'minus' || a === 'plus') {
+        const en = arr[i]; if (!en) return;
+        en.reps = Math.max(0, Math.min(999, (en.reps == null ? 0 : en.reps) + (a === 'plus' ? 1 : -1)));
+        saveState(); emomTick(); syncEmomRowInputs(i);
+      } else if (a === 'ok') {
+        const en = arr[i]; if (!en) return;
+        if (en.reps == null) en.reps = 0;
+        en.done = true;
+        saveState(); render(); emomTick();
+      }
+      if (a === 'stop') render();
+    });
+  }
+  const paused = emom.pausedAt != null;
+  const li = emomLogIndex(entries, minuteIdx);
+  const pct = emom.finished ? 100 : Math.round(((60 - remain) / 60) * 100);
+  const doneCount = entries.filter(e => e.done).length;
+  const head = emom.finished ? 'EMOM finito' : (paused ? 'In pausa · ' : '') + 'Minuto ' + (minuteIdx + 1) + '/' + emom.minutes;
+  const logHtml = li >= 0
+    ? `<div class="emom-log">
+        <span class="emom-log-lbl">Rep minuto ${li + 1}</span>
+        <button class="step-btn big" data-emom="minus" data-i="${li}" aria-label="Meno una rep">−</button>
+        <span class="emom-log-val">${entries[li].reps == null ? 0 : entries[li].reps}</span>
+        <button class="step-btn big" data-emom="plus" data-i="${li}" aria-label="Più una rep">+</button>
+        <button class="set-done" data-emom="ok" data-i="${li}" aria-label="Conferma minuto ${li + 1}">✓</button>
+      </div>`
+    : `<div class="emom-log muted small">${doneCount >= entries.length ? 'Tutti i minuti registrati ✓' : 'Registri le rep del minuto mentre riposi.'}</div>`;
+  p.className = emom.finished ? 'done' : (paused ? 'paused' : '');
+  p.innerHTML = `
+    <div class="emom-top">
+      <div class="emom-info"><span class="emom-name">${esc(f ? f.ex.name : 'EMOM')}</span><span class="emom-min">${head}</span></div>
+      <div class="emom-clock">${emom.finished ? '0:00' : fmtTime(remain)}</div>
+    </div>
+    <div class="timer-progress"><div style="width:${pct}%"></div></div>
+    ${logHtml}
+    <div class="emom-actions">
+      ${emom.finished ? '' : `<button class="btn-mini" data-emom="pause">${paused ? 'Riprendi' : 'Pausa'}</button>`}
+      <button class="btn-mini danger" data-emom="stop">${emom.finished ? 'Chiudi' : 'Stop'}</button>
+    </div>`;
+}
+/* aggiorna il campo rep della riga in seduta senza ridisegnare tutta la pagina */
+function syncEmomRowInputs(i) {
+  const s = activeSession(); if (!s) return;
+  const en = (s.entries[emom.rowId] || [])[i]; if (!en) return;
+  const inp = $('#view').querySelector(`input[data-entry="${emom.rowId}"][data-i="${i}"][data-field="reps"]`);
+  if (inp) inp.value = en.reps;
+}
+
 // sblocca l'audio al primo tocco (richiesto da iOS)
 document.addEventListener('touchstart', function unlock() {
   try {
@@ -277,6 +437,13 @@ function startSession(dayId) {
     for (const r of ex.rows) {
       // le rep partono VUOTE: vanno scritte quelle fatte davvero (il ✓ non si attiva senza),
       // così un tocco per sbaglio non registra rep mai fatte e non fa salire il peso per errore
+      if (r.type === 'emom') {
+        // EMOM: una riga per minuto, già compilata con peso (ridotto in scarico) e rep obiettivo;
+        // si corregge solo il minuto in cui si fa meno (es. 5, 5, 4, 3…)
+        fillEmomDefaults(r);
+        entries[r.id] = Array.from({ length: r.minutes }, () => ({ kg: effectiveWeight(r.weight), reps: r.repsPerMin, done: false }));
+        continue;
+      }
       const n = r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1);
       entries[r.id] = Array.from({ length: n }, () => ({ kg: effectiveWeight(r.weight), reps: null, done: false }));
     }
@@ -295,6 +462,7 @@ function finishSession() {
   if (!s) return;
   const anyDone = Object.values(s.entries).some(arr => arr.some(e => e.done));
   if (!anyDone) { toast('Nessuna serie completata: segna almeno una serie con ✓.'); return; }
+  if (emom.rowId) stopEmom();
   const prs = detectPRs(s); // record personali (prima di segnare la seduta come completata)
   s.completed = true;
   const changes = applyProgression(s);
@@ -311,6 +479,15 @@ function detectPRs(session) {
   if (!day) return prs;
   for (const ex of day.exercises) {
     for (const r of ex.rows) {
+      if (r.type === 'emom') {
+        // EMOM: il record è il miglior TOTALE di rep a parità di peso (non il peso massimo)
+        const sum = emomSummary(session, r.id);
+        if (!sum) continue;
+        const prev = emomBestByWeight(r.id, session.id).find(b => Math.abs(b.kg - sum.kg) < 0.01);
+        if (prev && sum.total > prev.total) prs.push({ ex: ex.name, row: r.label,
+          text: sum.total + ' rep totali a ' + (sum.kg ? fmtWeight(sum.kg) : 'corpo libero'), prevText: 'prima ' + prev.total });
+        continue;
+      }
       const nowEntries = (session.entries[r.id] || []).filter(e => e.done && e.kg != null && e.reps);
       if (!nowEntries.length) continue;
       const nowBest = Math.max(...nowEntries.map(e => e.kg));
@@ -331,6 +508,7 @@ function detectPRs(session) {
 function cancelSession() {
   const s = activeSession();
   if (!s) return;
+  if (emom.rowId) stopEmom();
   state.sessions = state.sessions.filter(x => x.id !== s.id);
   state.activeSessionId = null;
   saveState();
@@ -345,13 +523,13 @@ function cancelSession() {
 
 function showSummaryModal(changes, prs) {
   const prRows = (prs && prs.length)
-    ? `<div class="pr-box">${prs.map(p => `<div class="pr-row"><strong>Nuovo record</strong> ${esc(p.ex)} <span class="muted">${esc(p.row)}</span> — ${fmtWeight(p.kg)} <span class="muted">(prima ${fmtWeight(p.prev)})</span></div>`).join('')}</div>`
+    ? `<div class="pr-box">${prs.map(p => `<div class="pr-row"><strong>Nuovo record</strong> ${esc(p.ex)} <span class="muted">${esc(p.row)}</span> — ${p.text ? esc(p.text) + ` <span class="muted">(${esc(p.prevText)})</span>` : fmtWeight(p.kg) + ` <span class="muted">(prima ${fmtWeight(p.prev)})</span>`}</div>`).join('')}</div>`
     : '';
   const rows = changes.length
     ? changes.map(c => `<div class="progress-change">
         <span>${esc(c.ex)} <span class="muted">${esc(c.row)}</span></span>
         <span class="${c.kind}">${c.kind === 'up' ? '▲ ' : c.kind === 'down' ? '▼ ' : ''}${esc(c.text)}</span>
-      </div>${c.boost ? `<div class="boost-box">
+      </div>${c.note ? `<div class="progress-note">${esc(c.note)}</div>` : ''}${c.boost ? `<div class="boost-box">
         <span>Hai fatto ${c.boost.reps} rep (obiettivo ${c.boost.repMax}): il peso è leggero. Vuoi un passo doppio?</span>
         <button class="btn-mini" data-boost="${c.boost.rowId}" data-kg="${c.boost.kg}">Sali a ${fmtWeight(c.boost.kg)}</button>
       </div>` : ''}`).join('')
@@ -564,12 +742,14 @@ function renderWorkout() {
 
   let html = '';
 
-  const nSets = day.exercises.reduce((n, ex) => n + ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0), 0);
+  // serie: stessa regola della pagina Progressi (EMOM = 1 serie ogni 3 minuti)
+  const nSets = day.exercises.reduce((n, ex) => n + ex.rows.reduce((m, r) => m + rowWeeklySets(r), 0), 0);
   // minuti stimati: per ogni serie ~45s di lavoro + il recupero della sua categoria
   const estMin = Math.round(day.exercises.reduce((t, ex) => {
     const rest = (state.settings.rest[ex.restCat] || state.settings.rest.normale).seconds;
-    const sets = ex.rows.reduce((m, r) => m + (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)), 0);
-    return t + sets * (45 + rest);
+    return t + ex.rows.reduce((m, r) => m + (r.type === 'emom'
+      ? (r.minutes || 10) * 60   // un EMOM dura esattamente i suoi minuti
+      : (r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][0] : (r.sets || 1)) * (45 + rest)), 0);
   }, 0) / 60);
   if (!session) {
     html += `<div class="day-seg ${state.days.length > 4 ? 'scroll' : ''}">` + state.days.map(d => `
@@ -667,7 +847,13 @@ function renderExerciseCollapsed(ex, index, day, session) {
   const entries = ex.rows.flatMap(r => (session.entries[r.id] || []).map(e => ({ e, r })));
   const nDone = entries.filter(x => x.e.done).length;
   let sub;
-  if (nDone) {
+  const emomRow = ex.rows.find(r => r.type === 'emom');
+  if (emomRow && nDone) {
+    const sum = emomSummary(session, emomRow.id);
+    sub = 'EMOM ' + sum.reps.join('-') + ' = ' + sum.total + ' rep' + (done ? '' : ' · ' + nDone + '/' + entries.length + ' min');
+  } else if (emomRow) {
+    sub = 'EMOM ' + entries.length + ' min · da fare';
+  } else if (nDone) {
     sub = entries.filter(x => x.e.done).map(x => x.r.type === 'tempo' ? (x.e.reps || 0) + 's'
       : x.e.kg ? fmtKg(toDisplayWeight(x.e.kg)) + '×' + (x.e.reps || 0) : (x.e.reps || 0) + ' rep').join(' · ');
     if (!done) sub += ' · ' + nDone + '/' + entries.length + ' serie';
@@ -705,7 +891,7 @@ function renderExercise(ex, index, day, session) {
         ${thumb}
         <div style="min-width:0">
           <div class="ex-name">${esc(ex.name)}</div>
-          ${session ? `<div class="ex-meta">${esc(rest.label)}${ex.note ? ' · ' + esc(ex.note) : ''}</div>` : (ex.note ? `<div class="ex-meta">${esc(ex.note)}</div>` : '')}
+          ${(session && !ex.rows.every(r => r.type === 'emom')) ? `<div class="ex-meta">${esc(rest.label)}${ex.note ? ' · ' + esc(ex.note) : ''}</div>` : (ex.note ? `<div class="ex-meta">${esc(ex.note)}</div>` : '')}
         </div>
       </div>
       <div class="ex-tools">
@@ -739,13 +925,15 @@ function renderExercise(ex, index, day, session) {
   }
 
   // pulsante recupero (solo durante la seduta)
-  if (session) html += `<button class="rest-btn" data-action="rest-timer" data-cat="${ex.restCat}">Recupero ${esc(restShort)} · avvia ${fmtTime(rest.seconds)}</button>`;
+  // (un EMOM non ha recupero tra le serie: si riposa nel resto di ogni minuto)
+  if (session && !ex.rows.every(r => r.type === 'emom')) html += `<button class="rest-btn" data-action="rest-timer" data-cat="${ex.restCat}">Recupero ${esc(restShort)} · avvia ${fmtTime(rest.seconds)}</button>`;
 
   html += `</div></div>`;
   return html;
 }
 
 function renderRow(ex, r, session) {
+  if (r.type === 'emom') return renderEmomRow(ex, r, session);
   const prevBest = (r.type === 'reps' || r.type === 'tempo') ? bestRepsFor(r.id) : 0;
   let target;
   if (r.type === 'russo') {
@@ -835,6 +1023,54 @@ function renderRow(ex, r, session) {
       <button class="btn-mini" data-action="add-set" data-entry="${r.id}">+ serie</button>
     </div>`;
   }
+  return html + '</div>';
+}
+
+/* Riga EMOM: in anteprima tre colonne (Rep/min, Peso, Durata); in seduta una riga per minuto
+   (peso, rep con − / +, ✓) e il pulsante "Avvia EMOM". Stesse classi delle altre serie:
+   così campi grandi, temi chiaro/scuro e layout restano uguali al resto dell'app. */
+function renderEmomRow(ex, r, session) {
+  fillEmomDefaults(r);
+  const dl = deloadInfo();
+  const kg = dl.active ? effectiveWeight(r.weight) : r.weight;
+  const pesoTxt = kg ? fmtKg(toDisplayWeight(kg)) + ' ' + unitLabel() : 'corpo';
+  const last = lastEmomSummary(r.id, { excludeId: session && session.id });
+  const lastNote = last ? 'La volta scorsa' + (last.kg ? ' (' + fmtWeight(last.kg) + ')' : '') + ': ' + fmtEmomReps(last) : '';
+  const capTxt = 'tetto ' + r.repsCap + ' rep/min, poi +' + fmtKg(exIncrement(ex)) + ' kg';
+  if (!session) {
+    return `<div class="set-plan">
+      <div class="set-plan-title">EMOM <span class="muted">· ogni minuto · ${esc(capTxt)}</span>${dl.active && r.weight ? ' <span class="warn">· scarico</span>' : ''}</div>
+      <div class="set-plan-grid">
+        <div><span class="l">Rep/min</span><span class="v">${r.repsPerMin}</span></div>
+        <div><span class="l">Peso</span><span class="v">${esc(pesoTxt)}</span></div>
+        <div><span class="l">Durata</span><span class="v">${r.minutes} min</span></div>
+      </div>
+      ${lastNote ? `<div class="set-plan-last">${esc(lastNote)}</div>` : ''}
+    </div>`;
+  }
+  const entries = session.entries[r.id] || [];
+  const running = emom.rowId === r.id;
+  let html = `<div class="set-block">
+    <div class="set-head"><span class="set-label">EMOM</span><span class="set-target">${r.minutes} min · ${r.repsPerMin} rep/min · ${kg ? fmtWeight(kg) : 'corpo libero'}${dl.active && r.weight ? ' <span class="warn">(scarico)</span>' : ''}</span></div>
+    ${lastNote ? `<div class="suggestion-note">${esc(lastNote)}</div>` : ''}
+    <button class="btn full emom-start" data-action="emom-start" data-entry="${r.id}" ${running ? 'disabled' : ''}>${running ? 'EMOM in corso…' : '▶ Avvia EMOM'}</button>
+    <div class="set-cols"><span>Min</span><span>${unitLabel()}</span><span>Ripetizioni</span><span>✓</span></div>`;
+  entries.forEach((e, i) => {
+    html += `<div class="set-row">
+      <span class="set-num">${i + 1}</span>
+      <input class="kg-input" type="text" inputmode="decimal" placeholder="${unitLabel()}" value="${e.kg != null ? String(toDisplayWeight(e.kg)).replace('.', ',') : ''}"
+        data-entry="${r.id}" data-i="${i}" data-field="kg" aria-label="${unitLabel()} minuto ${i + 1}">
+      <div class="rep-stepper">
+        <button class="step-btn" data-action="step-reps" data-entry="${r.id}" data-i="${i}" data-d="-1" aria-label="Meno una rep">−</button>
+        <input type="text" inputmode="numeric" placeholder="${r.repsPerMin}" value="${e.reps != null ? e.reps : ''}"
+          data-entry="${r.id}" data-i="${i}" data-field="reps" aria-label="rep minuto ${i + 1}">
+        <button class="step-btn" data-action="step-reps" data-entry="${r.id}" data-i="${i}" data-d="1" aria-label="Più una rep">+</button>
+      </div>
+      <button class="set-done ${e.done ? 'done' : ''}" data-action="toggle-done" data-entry="${r.id}" data-i="${i}" data-cat="${ex.restCat}" aria-label="Minuto ${i + 1} fatto">✓</button>
+    </div>`;
+  });
+  const sumNow = emomSummary(session, r.id);
+  if (sumNow) html += `<div class="emom-total">Oggi finora: ${sumNow.reps.join('-')} · <strong>${sumNow.total} rep</strong>${last ? ` <span class="muted">(la volta scorsa ${last.total})</span>` : ''}</div>`;
   return html + '</div>';
 }
 
@@ -968,7 +1204,7 @@ function renderCharts() {
       <div class="form-row"><select id="chart-ex-select">
         ${opts.map(o => `<option value="${o.id}" ${o.id === chartExRowId ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}
       </select></div>
-      <div class="seg seg-sm">${[['kg', 'Peso massimo'], ['1rm', 'Massimale stimato']].map(([k, l]) => `<button data-action="chart-metric" data-metric="${k}" class="${chartMetric === k ? 'on' : ''}">${l}</button>`).join('')}</div>
+      <div class="seg seg-sm" id="chart-metric-seg">${[['kg', 'Peso massimo'], ['1rm', 'Massimale stimato']].map(([k, l]) => `<button data-action="chart-metric" data-metric="${k}" class="${chartMetric === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div class="seg seg-sm">${[['6', 'Ultimi 6'], ['90', '3 mesi'], ['all', 'Tutto']].map(([k, l]) => `<button data-action="chart-range" data-range="${k}" class="${chartRange === k ? 'on' : ''}">${l}</button>`).join('')}</div>
       <div id="chart-exercise"></div>
     </div>
@@ -1030,19 +1266,32 @@ function mountCharts() {
     const found = findRow(chartExRowId);
     const r = found && found.row;
     const wPts = rowWeightHistory(chartExRowId);
-    // corpo libero / a cedimento: il peso è sempre 0 → mostro ripetizioni (o secondi)
-    const byReps = r && (r.type === 'reps' || r.type === 'tempo' || !wPts.some(p => p.y > 0));
-    const sub = $('#chart-ex-sub');
-    if (byReps) {
-      const unit = r.type === 'tempo' ? 'sec' : 'rep';
-      if (sub) sub.textContent = (unit === 'sec' ? 'Secondi migliori' : 'Ripetizioni migliori') + ' per seduta (esercizio senza peso o a cedimento)';
-      lineChart($('#chart-exercise'), [{ name: unit, color: '#0a84ff', points: pick(rowRepsHistory(chartExRowId)) }], { unit });
-    } else if (chartMetric === '1rm') {
-      if (sub) sub.textContent = 'Massimale stimato (Epley) da serie fino a 12 rep · 🪶 = scarico';
-      lineChart($('#chart-exercise'), [{ name: '1RM', color: '#30d158', points: pick(e1RMHistory(chartExRowId)) }], { unit: 'kg' });
+    // selettore peso/massimale: inutile per gli EMOM (niente 1RM)
+    const mSeg = $('#chart-metric-seg'); if (mSeg) mSeg.style.display = r && r.type === 'emom' ? 'none' : '';
+    if (r && r.type === 'emom') {
+      // EMOM: totale rep per seduta (peso e rep di ogni minuto nel dettaglio del punto);
+      // l'1RM stimato non si calcola, quindi il selettore peso/massimale qui non serve
+      const sub = $('#chart-ex-sub');
+      if (sub) sub.textContent = 'EMOM: totale rep per seduta · tocca un punto per peso e rep di ogni minuto';
+      lineChart($('#chart-exercise'), [{ name: 'rep', color: '#0a84ff', points: pick(rowEmomHistory(chartExRowId)) }], { unit: 'rep' });
+      const recs = emomBestByWeight(chartExRowId);
+      if (recs.length) $('#chart-exercise').insertAdjacentHTML('beforeend', `<div class="emom-recs">${recs.map(b =>
+        `<span class="chip static">${b.kg ? fmtWeight(b.kg) : 'Corpo'} · record ${b.total} rep</span>`).join('')}</div>`);
     } else {
-      if (sub) sub.textContent = 'Peso massimo per seduta · 🪶 = settimana di scarico';
-      lineChart($('#chart-exercise'), [{ name: 'kg', color: '#0a84ff', points: pick(wPts) }], { unit: 'kg' });
+      // corpo libero / a cedimento: il peso è sempre 0 → mostro ripetizioni (o secondi)
+      const byReps = r && (r.type === 'reps' || r.type === 'tempo' || !wPts.some(p => p.y > 0));
+      const sub = $('#chart-ex-sub');
+      if (byReps) {
+        const unit = r.type === 'tempo' ? 'sec' : 'rep';
+        if (sub) sub.textContent = (unit === 'sec' ? 'Secondi migliori' : 'Ripetizioni migliori') + ' per seduta (esercizio senza peso o a cedimento)';
+        lineChart($('#chart-exercise'), [{ name: unit, color: '#0a84ff', points: pick(rowRepsHistory(chartExRowId)) }], { unit });
+      } else if (chartMetric === '1rm') {
+        if (sub) sub.textContent = 'Massimale stimato (Epley) da serie fino a 12 rep · 🪶 = scarico';
+        lineChart($('#chart-exercise'), [{ name: '1RM', color: '#30d158', points: pick(e1RMHistory(chartExRowId)) }], { unit: 'kg' });
+      } else {
+        if (sub) sub.textContent = 'Peso massimo per seduta · 🪶 = settimana di scarico';
+        lineChart($('#chart-exercise'), [{ name: 'kg', color: '#0a84ff', points: pick(wPts) }], { unit: 'kg' });
+      }
     }
   } else {
     $('#chart-exercise').innerHTML = '<div class="chart-empty">Nessun esercizio.</div>';
@@ -1393,6 +1642,7 @@ function editExerciseModal(dayId, exId) {
             <option value="russo" ${r.type === 'russo' ? 'selected' : ''}>Schema russo</option>
             <option value="reps" ${r.type === 'reps' ? 'selected' : ''}>A cedimento — batti le rep</option>
             <option value="tempo" ${r.type === 'tempo' ? 'selected' : ''}>A cedimento — batti i secondi</option>
+            <option value="emom" ${r.type === 'emom' ? 'selected' : ''}>EMOM (ogni minuto)</option>
           </select>
         </div>
         <div class="form-row"><label>Peso (kg)</label><input data-rf="weight" type="text" inputmode="decimal" value="${String(r.weight).replace('.', ',')}"></div>
@@ -1402,7 +1652,14 @@ function editExerciseModal(dayId, exId) {
         <div class="form-row"><label>Rep max</label><input data-rf="repMax" type="number" inputmode="numeric" value="${r.repMax}"></div>
 
       </div>
-      <div class="form-grid-2 rf-sets" style="${r.type === 'russo' ? 'display:none' : ''}">
+      <div class="form-grid-2 rf-emom" style="${r.type === 'emom' ? '' : 'display:none'}">
+        <div class="form-row"><label>Minuti</label><input data-rf="minutes" type="number" inputmode="numeric" value="${r.minutes || EMOM_DEFAULTS.minutes}"></div>
+        <div class="form-row"><label>Rep al minuto</label><input data-rf="repsPerMin" type="number" inputmode="numeric" value="${r.repsPerMin || EMOM_DEFAULTS.repsPerMin}"></div>
+        <div class="form-row"><label>Tetto rep/min</label><input data-rf="repsCap" type="number" inputmode="numeric" value="${r.repsCap || EMOM_DEFAULTS.repsCap}"></div>
+        <div class="form-row"><label>Dopo +peso riparti da</label><input data-rf="resetReps" type="number" inputmode="numeric" value="${r.resetReps || EMOM_DEFAULTS.resetReps}"></div>
+      </div>
+      <p class="muted small rf-emom" style="${r.type === 'emom' ? '' : 'display:none'}">Ogni minuto fai le rep previste e riposi il resto del minuto. Tutti i minuti completati → +1 rep al minuto; arrivato al tetto → +peso (l'incremento dell'esercizio) e si riparte. Peso 0 = corpo libero.</p>
+      <div class="form-grid-2 rf-sets" style="${(r.type === 'russo' || r.type === 'emom') ? 'display:none' : ''}">
         <div class="form-row"><label>N. serie</label><input data-rf="sets" type="number" inputmode="numeric" value="${r.sets || 1}"></div>
       </div>
       <p class="muted small rf-hint" style="${(r.type === 'reps' || r.type === 'tempo') ? '' : 'display:none'}">Peso fisso: ogni volta l'obiettivo è battere ${r.type === 'tempo' ? 'i secondi' : 'le ripetizioni'} della volta prima.</p>
@@ -1488,7 +1745,13 @@ function editExerciseModal(dayId, exId) {
         inp.addEventListener('change', () => {
           const f = inp.dataset.rf;
           if (f === 'label') tmpRows[i].label = inp.value;
-          else if (f === 'type') { tmpRows[i].type = inp.value; rerenderRows(); }
+          else if (f === 'type') {
+            tmpRows[i].type = inp.value;
+            if (inp.value === 'emom') fillEmomDefaults(tmpRows[i]); // campi EMOM con i valori di partenza
+            rerenderRows();
+          }
+          else if (f === 'minutes') tmpRows[i][f] = Math.max(1, Math.min(60, parseInt(inp.value) || EMOM_DEFAULTS.minutes));
+          else if (f === 'repsPerMin' || f === 'repsCap' || f === 'resetReps') tmpRows[i][f] = Math.max(1, Math.min(100, parseInt(inp.value) || EMOM_DEFAULTS[f]));
           else if (f === 'weight' || f === 'russoIncrement') tmpRows[i][f] = Math.max(0, Math.min(1000, parseNum(inp.value) || 0));
           else if (f === 'schemeIndex') tmpRows[i][f] = Math.max(0, Math.min(RUSSO_SCHEME.length - 1, parseInt(inp.value) || 0));
           else if (f === 'sets') tmpRows[i][f] = Math.max(1, Math.min(20, parseInt(inp.value) || 1));
@@ -1563,7 +1826,10 @@ function editExerciseModal(dayId, exId) {
     ex.restCat = modal.querySelector('#ee-rest').value;
     ex.warmup = modal.querySelector('#ee-warmup').value;
     ex.muscles = tmpMuscles;
-    tmpRows.forEach(r => { if (r.repMin > r.repMax) [r.repMin, r.repMax] = [r.repMax, r.repMin]; });
+    tmpRows.forEach(r => {
+      if (r.repMin > r.repMax) [r.repMin, r.repMax] = [r.repMax, r.repMin];
+      if (r.type === 'emom') fillEmomDefaults(r); // es. "riparti da" più alto del tetto → corretto
+    });
     ex.rows = tmpRows;
     ex.dsId = tmpDs.dsId; ex.dsMedia = tmpDs.dsMedia; ex.dsName = tmpDs.dsName;
     if (isNew) day.exercises.push(ex);
@@ -1757,6 +2023,17 @@ function exerciseHistoryModal(exId) {
     const hist = rowFullHistory(r.id);
     const isTime = r.type === 'tempo';
     const isReps = r.type === 'reps';
+    if (r.type === 'emom') {
+      const recs = emomBestByWeight(r.id);
+      const list = hist.length ? hist.map(h => {
+        const tot = h.sets.reduce((a, s) => a + (s.reps || 0), 0);
+        const kg = Math.max(0, ...h.sets.map(s => s.kg || 0));
+        return `<div class="hist-item"><span class="muted">${fmtDate(h.date)}</span><span style="text-align:right">${kg ? fmtWeight(kg) + ' · ' : ''}${h.sets.map(s => s.reps || 0).join('-')} <strong>= ${tot}</strong></span></div>`;
+      }).join('') : '<p class="muted small">Ancora nessuna seduta registrata.</p>';
+      const recHtml = recs.length ? `<div class="section-title">Record EMOM · miglior totale per peso</div>` + recs.map(b =>
+        `<div class="hist-item"><span>${b.kg ? fmtWeight(b.kg) : 'Corpo libero'}</span><span><strong>${b.total} rep</strong> <span class="muted">${fmtDate(b.date)}</span></span></div>`).join('') : '';
+      return `<div class="section-title">EMOM <span class="muted" style="text-transform:none;letter-spacing:0">(${hist.length})</span></div>${list}${recHtml}`;
+    }
     const rowsHtml = hist.length ? hist.map(h => {
       const sets = h.sets.map(s => {
         if (isTime) return (s.reps || 0) + 's';
@@ -1904,6 +2181,7 @@ function handleAction(a, btn) {
       tempoTimer(btn.dataset.entry, parseInt(btn.dataset.i), btn.dataset.cat);
     }
     else if (a === 'warmup-timer') startTimer('Rest riscaldamento', state.settings.warmupRest);
+    else if (a === 'emom-start') startEmom(btn.dataset.entry);
     else if (a === 'rest-timer') {
       const cat = state.settings.rest[btn.dataset.cat] || state.settings.rest.normale;
       startTimer('Recupero', cat.seconds);
@@ -1918,6 +2196,7 @@ function handleAction(a, btn) {
           .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
         const le = last && last.entries[btn.dataset.entry].filter(e => e.done && e.reps != null);
         entry.reps = le && le.length ? le[Math.min(parseInt(btn.dataset.i), le.length - 1)].reps
+          : r && r.type === 'emom' ? r.repsPerMin
           : r && r.type === 'russo' ? RUSSO_SCHEME[Math.min(r.schemeIndex || 0, RUSSO_SCHEME.length - 1)][1]
           : r && r.type === 'range' ? r.repMin : 1;
       } else entry.reps = Math.max(0, entry.reps + parseInt(btn.dataset.d));
@@ -1925,6 +2204,7 @@ function handleAction(a, btn) {
       // aggiornamento mirato dell'input (niente re-render: più fluido e non perde lo scroll)
       const inp = $('#view').querySelector(`input[data-entry="${btn.dataset.entry}"][data-i="${btn.dataset.i}"][data-field="reps"]`);
       if (inp) inp.value = entry.reps;
+      if (emom.rowId === btn.dataset.entry) emomTick();
     }
     else if (a === 'toggle-done') {
       const s = activeSession(); if (!s) { toast('Prima premi "Inizia seduta".'); return; }
@@ -1940,7 +2220,8 @@ function handleAction(a, btn) {
       entry.done = !entry.done;
       // rilevamento nuovo record (solo alla marcatura, batte il best delle sedute PASSATE)
       let isPR = false;
-      if (entry.done) {
+      const isEmom = isEmomRow(rowId);
+      if (entry.done && !isEmom) {
         if (entry.kg != null && entry.reps) {
           const prev = bestE1RM(rowId);
           if (prev > 0 && e1RM(entry.kg, entry.reps) > prev + 0.05) isPR = true;
@@ -1950,10 +2231,12 @@ function handleAction(a, btn) {
         }
       }
       saveState();
-      if (entry.done) {
+      // EMOM: niente timer di recupero (scandisce già il minuto); se il pannello è aperto lo aggiorno
+      if (entry.done && !isEmom) {
         const cat = state.settings.rest[btn.dataset.cat] || state.settings.rest.normale;
         startTimer('Recupero', cat.seconds);
       }
+      if (isEmom && emom.rowId === rowId) emomTick();
       // esercizio finito → si chiude e si apre il prossimo da fare
       let advanced = null;
       const fr = findRow(rowId), sDay = getDay(s.dayId);

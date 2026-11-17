@@ -6,11 +6,18 @@ si installa sulla schermata Home e funziona anche offline.
 ## Cosa fa
 
 - **Scheda a giorni** (A/B/C…) con esercizi, serie e progressione automatica:
-  schema russo (3x3 → 5x5, poi +kg), rep range, serie a cedimento (rep o secondi), tetto di carico.
+  schema russo (3x3 → 5x5, poi +kg), rep range, serie a cedimento (rep o secondi).
+- **EMOM (ogni minuto)**: per N minuti fai X rep all'inizio di ogni minuto e riposi il resto.
+  Una riga per minuto in seduta (correggi le rep reali, es. 5-5-4-3-2), timer dedicato con
+  "Minuto 3/10", bip e vibrazione a ogni minuto, avviso a 3 secondi, pausa/stop e registrazione
+  veloce delle rep senza chiudere il timer. Progressione: tutti i minuti completati → +1 rep/min;
+  al tetto (es. 10) → +peso e si riparte (es. da 5). Nel riepilogo il totale rep è confrontato
+  con l'ultima volta allo stesso peso. Grafico del totale rep per seduta e record per peso;
+  gli EMOM non entrano nell'1RM stimato (serie sub-massimali) e contano 1 serie ogni 3 minuti.
 - **Timer di recupero** con suono, vibrazione e schermo sempre acceso.
 - **Riscaldamento** calcolato in automatico (20/50/70% del carico).
 - **Scarico (deload)** periodico con pesi dimezzati.
-- **Progressi**: grafici di forza, 1RM stimato (Epley), volume, costanza, volume per muscolo, peso corporeo.
+- **Progressi**: grafici di forza, 1RM stimato (Epley), volume, costanza, serie a settimana per muscolo, peso corporeo.
 - **Mappa muscoli** fronte/retro colorata per giorno (nella scheda Progressi).
 - **Cardio** con progressione graduale:
   - *Salto corda*: tempo fisso (10 min), il lavoro cresce e il riposo cala di 5s a ogni sessione completata fino al continuo; poi il tempo continuo sale di 1 min a ogni completamento.

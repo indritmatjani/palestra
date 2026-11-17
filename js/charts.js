@@ -148,6 +148,19 @@ function rowWeightHistory(rowId) {
   return pts.sort((a, b) => (a.x < b.x ? -1 : 1));
 }
 
+/* EMOM: TOTALE ripetizioni per seduta (somma dei minuti fatti), col peso nell'etichetta del punto.
+   È la misura giusta per un EMOM: il numero di rep in 10 minuti, non la serie migliore. */
+function rowEmomHistory(rowId) {
+  const pts = [];
+  for (const s of state.sessions) {
+    if (!s.completed) continue;
+    const sum = emomSummary(s, rowId);
+    if (!sum) continue;
+    pts.push({ x: s.date, y: sum.total, label: (sum.kg ? fmtWeight(sum.kg) : 'corpo libero') + ' · ' + sum.reps.join('-'), deload: deloadWeekActive(s.date) });
+  }
+  return pts.sort((a, b) => (a.x < b.x ? -1 : 1));
+}
+
 /* Miglior risultato in ripetizioni (o secondi) per seduta: per esercizi senza peso. */
 function rowRepsHistory(rowId) {
   const pts = [];
